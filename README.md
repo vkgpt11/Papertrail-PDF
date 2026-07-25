@@ -1,238 +1,254 @@
-# Papertrail PDF
+<div align="center">
+  <img src="assets/branding/papertrail-icon-1024.png" alt="Papertrail PDF logo" width="120">
 
-Papertrail PDF is a private, offline-first PDF reader for Android and iOS, built with Flutter.
+  # Papertrail PDF
 
-## Features
+  A private, offline-first PDF reader for Android and iOS, built with Flutter.
 
-- Add one or multiple PDFs using the system document picker
-- Scan a user-approved folder and import all PDFs inside it
-- Search the PDF library by filename
-- Search text across every PDF with page snippets and recent-search history
-- Offline OCR indexing for scanned PDFs
-- Filter search by folder, document date, page count, and file size
-- Sort PDFs by name, recent activity, document date, file size, or page count
-- Recently opened section with the five most recent documents
-- First-page thumbnails in the PDF library
-- Page count and file size for every PDF
-- Reading position and percentage progress
-- Last-opened date and time
-- Rename PDFs inside the Papertrail library
-- Create library folders and move PDFs between them
-- Delete Papertrail's stored PDF copy from the device with confirmation
-- Automatic reading-position restore
-- In-document text search with highlighted results
-- Previous and next search-result navigation
-- Password prompt for protected PDFs
-- Page-thumbnail navigation and jump-to-page
-- Persistent page bookmarks and PDF table-of-contents navigation
-- Vertical, horizontal, and two-page viewing modes
-- Rotate, fit-width, fit-page, and full-screen controls
-- Reduced-memory rendering for large documents
-- Automatic page recovery after an unexpected close
-- Remember precise zoom level and scroll position per PDF
-- Reader brightness slider and optional keep-screen-awake mode
-- Normal, night, and sepia reading modes
-- Configurable page spacing and document background
-- Right-to-left page navigation
-- Screen-reader labels and responsive tablet/foldable layouts
-- Optional bottom page-number/navigation controls, disabled by default
-- Top-left navigation drawer with application Settings
-- Configurable Sort menu with only essential options enabled by default
-- Configurable open-reader actions with only essential tools enabled by default
-- Collapsible General, Header, Sorting, and Reader sections in Settings
-- Configurable library header actions with only Sort and Theme enabled by default
-- Persistent annotation layer with highlighting, underline, strikethrough,
-  drawing, notes, signatures, shapes, stamps, undo, and redo
-- Pinch-to-zoom, links, and text selection
-- Light and dark themes
-- Open PDFs through Android's **Open with** menu
-- Receive PDFs from the Android Share menu and iOS document picker
-- Print PDFs using the Android/iOS system print dialog
-- Encrypted storage for private library metadata
-- Local-only crash diagnostics with no network transmission
-- Automatic cleanup of stale incoming and OCR temporary files
-- No account, advertising, analytics, or tracking
+  [![Flutter](https://img.shields.io/badge/Flutter-3.32%2B-02569B?logo=flutter)](https://flutter.dev)
+  [![Android](https://img.shields.io/badge/Android-supported-3DDC84?logo=android&logoColor=white)](#platform-status)
+  [![iOS](https://img.shields.io/badge/iOS-source%20available-000000?logo=apple)](#platform-status)
+  [![Tests](https://img.shields.io/badge/tests-58%20passing-brightgreen)](#testing)
+  [![Privacy](https://img.shields.io/badge/privacy-offline--first-6558D3)](store/PRIVACY_POLICY.md)
+</div>
 
-## Privacy and device files
+> [!IMPORTANT]
+> Papertrail PDF is under active development and is not yet distributed through
+> Google Play or the App Store. Release builds currently require your own
+> signing configuration.
 
-Android and iOS do not allow an App Store application to silently scan every document on the phone. Use **Add PDFs** to select one or more files. Selected PDFs are copied into Papertrail's private offline library and appear under **All PDFs**. A document appears under **Recently opened** after you open it.
+## ✨ Why Papertrail?
 
-## Requirements
+Papertrail is designed for people who want capable PDF reading without creating
+an account or sending their document library to a remote service. PDFs, search
+indexes, reading progress, signatures, annotations, and crash diagnostics stay
+on the device.
 
-- Windows 11, macOS, or Linux
-- Flutter 3.32.2 or a compatible newer stable version
+## 🚀 Highlights
+
+### 🗂️ Library and file organization
+
+- Import PDFs with the system document picker or from a user-approved folder
+- Open PDFs sent through Android **Open with** and supported iOS document flows
+- All, Favorites, Uncategorized, custom-folder, and Recently opened sections
+- Rename, move, share, remove, or permanently delete library copies
+- Multi-select actions for moving, removing, and deleting documents
+- Duplicate detection based on document fingerprints
+- Sort by name, recent activity, document date, size, or page count
+- First-page thumbnails, file metadata, and responsive phone/tablet layouts
+
+### 🔎 Search and smart reading
+
+- Search filenames and text across the PDF library
+- Page-numbered result snippets and recent-search history
+- Offline OCR indexing for scanned pages
+- Cached, serialized indexing to limit repeated CPU, memory, and battery use
+- Search filters for folder, date, page count, and file size
+- Private on-device extractive summaries with progress and cancellation
+- Ranked important-information cards linked to their source pages
+
+### 📖 Reading experience
+
+- Select and copy PDF text
+- Search inside an open document with previous/next result navigation
+- Password prompts for protected PDFs
+- Page thumbnails, jump-to-page, bookmarks, and table of contents
+- Vertical, horizontal, and two-page layouts
+- Double-tap and pinch zoom, rotation, fit-width, fit-page, and full screen
+- Persistent page, zoom, and scroll-position recovery
+- Normal, night, and sepia modes
+- Brightness, page spacing, background, right-to-left navigation, and
+  keep-screen-awake controls
+- Configurable header, sorting, reader, notification, and navigation options
+
+### ✍️ Annotations and signatures
+
+- Highlight, underline, strikethrough, freehand drawing, notes, shapes, and stamps
+- Draw reusable signatures or import signature images
+- Drag annotations and signatures into position
+- Page-bound annotation coordinates that follow scrolling, zoom, and rotation
+- Undo, redo, atomic saving, and unsaved-change protection
+- Annotated Share and Print output through a flattened PDF copy
+
+## 🔐 Privacy
+
+Papertrail does not require an account and does not include advertising,
+analytics, or tracking. Library metadata is stored in encrypted platform
+storage where available. Search and OCR data remain inside the application
+sandbox.
+
+The system document picker controls which files Papertrail can access. Imported
+PDFs are copied into the application's private library; deleting a Papertrail
+copy does not delete the original file held by Downloads, Drive, WhatsApp, or
+another provider.
+
+See the full [Privacy Policy](store/PRIVACY_POLICY.md).
+
+## 📱 Platform status
+
+| Platform | Status | Notes |
+|---|---|---|
+| Android | Actively tested | Emulator and physical-device workflows supported |
+| iOS | Source available | Requires macOS/Xcode signing and final physical-device verification |
+
+## 🛠️ Getting started
+
+### ✅ Prerequisites
+
+- Flutter 3.32.2 or a compatible newer stable release
 - Dart 3.8 or later
-- JDK 17 for Android builds
-- Android SDK with platform and build tools installed
-- macOS with Xcode for iOS builds
+- JDK 17 and the Android SDK for Android builds
+- macOS, Xcode, and an Apple Developer account for iOS builds
 
-Verify the setup:
+Verify your environment:
 
 ```sh
 flutter doctor -v
 ```
 
-## Install dependencies
+### 📦 Clone and install dependencies
 
-Open PowerShell in the project directory:
-
-```powershell
-cd "C:\Users\vikas\OneDrive\H1B\Documents\PDF Reader"
-$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.15.6-hotspot"
+```sh
+git clone https://github.com/vkgpt11/Papertrail-PDF.git
+cd Papertrail-PDF
 flutter pub get
 ```
 
-## Run on an Android emulator
+### ▶️ Run the application
 
-List available emulators:
+List available devices:
 
-```powershell
-flutter emulators
-```
-
-Start the configured Pixel emulator:
-
-```powershell
-flutter emulators --launch Pixel_9
-```
-
-Wait for Android to finish booting, then run:
-
-```powershell
-flutter run -d emulator-5554
-```
-
-If the device identifier differs, find it with `flutter devices` and use that identifier after `-d`.
-
-## Run on a physical Android phone
-
-1. On the phone, open **Settings > About phone**.
-2. Tap **Build number** seven times.
-3. Open **Settings > System > Developer options**.
-4. Enable **USB debugging**.
-5. Connect the phone with a data-capable USB cable.
-6. Select **File transfer** as the USB mode.
-7. Accept the **Allow USB debugging** prompt.
-8. Confirm the connection:
-
-```powershell
+```sh
 flutter devices
 ```
 
-9. Run the app using the displayed device identifier:
+Run on a selected emulator or connected device:
 
-```powershell
+```sh
 flutter run -d DEVICE_ID
 ```
 
-## Run checks
+To start a configured Android emulator first:
 
-```powershell
-dart format lib test
-dart analyze lib test
-flutter test --no-pub
+```sh
+flutter emulators
+flutter emulators --launch EMULATOR_ID
 ```
 
-## Build an installable Android APK
+## 🧪 Testing
 
-### Automatic named release (recommended)
+Format, analyze, and run the complete unit/widget suite:
 
-Set the app version in `pubspec.yaml`. Increase the build number after `+` for
-every store release:
-
-```yaml
-version: 1.1.0+2
+```sh
+dart format --output=none --set-exit-if-changed lib test integration_test
+flutter analyze
+flutter test
 ```
 
-Run the included release script:
+Run the annotated-export integration test on an Android emulator:
 
-```powershell
-cd "C:\Users\vikas\OneDrive\H1B\Documents\PDF Reader"
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\build-release.ps1
+```sh
+flutter test integration_test/annotation_export_test.dart -d DEVICE_ID
 ```
 
-The script reads the version automatically and creates:
+The current suite covers document metadata, sorting and filters, search-index
+serialization, summaries, annotation persistence, signatures, responsive
+layouts, preferences, platform contracts, and annotated export.
+
+## 🤖 Building Android
+
+### 📲 APK
+
+```sh
+flutter build apk --release
+```
+
+Output:
 
 ```text
-release\Papertrail-PDF-v1.1.0-build2.apk
+build/app/outputs/flutter-apk/app-release.apk
 ```
 
-Build only an APK, only a Play Store bundle, or both:
+Windows users can generate a versioned APK, App Bundle, or both with:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\build-release.ps1 -Format apk
 .\build-release.ps1 -Format aab
 .\build-release.ps1 -Format both
 ```
 
-### Manual APK build
+### 🏪 Google Play App Bundle
 
-```powershell
-cd "C:\Users\vikas\OneDrive\H1B\Documents\PDF Reader"
-$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.15.6-hotspot"
-flutter clean
-flutter pub get
-flutter build apk --release
-```
-
-The APK is created at:
-
-```text
-build\app\outputs\flutter-apk\app-release.apk
-```
-
-Before installing a replacement build, uninstall an older debug build if Android reports a signature conflict.
-
-Install the release APK on the connected emulator or phone:
-
-```powershell
-adb install -r "build\app\outputs\flutter-apk\app-release.apk"
-```
-
-## Build the Google Play App Bundle
-
-A Play Store release requires a private upload keystore and release signing configuration. The current project still uses debug signing for local release builds and must not be uploaded to Google Play until signing is configured.
-
-After configuring release signing:
-
-```powershell
-cd "C:\Users\vikas\OneDrive\H1B\Documents\PDF Reader"
-$env:JAVA_HOME="C:\Program Files\Eclipse Adoptium\jdk-17.0.15.6-hotspot"
-flutter clean
-flutter pub get
+```sh
 flutter build appbundle --release
 ```
 
-The bundle is created at:
+Output:
 
 ```text
-build\app\outputs\bundle\release\app-release.aab
+build/app/outputs/bundle/release/app-release.aab
 ```
 
-## Build for iOS
+> [!WARNING]
+> The checked-in Android configuration uses debug signing for local release
+> testing. Configure a private upload keystore and secure release-signing
+> properties before uploading an App Bundle to Google Play. Never commit
+> keystores, passwords, or `key.properties`.
 
-An iOS build requires macOS, Xcode, an Apple Developer account, and a configured development team.
+## 🍎 Building iOS
+
+On macOS:
 
 ```sh
 flutter pub get
+open ios/Runner.xcworkspace
+```
+
+Configure the development team and signing in Xcode, then build with:
+
+```sh
 flutter build ipa --release
 ```
 
-Open `ios/Runner.xcworkspace` in Xcode to configure signing and upload the archive to App Store Connect.
+iOS incoming-document behavior must be verified on a physical iPhone before an
+App Store release.
 
-## Using the PDF library
+## ⚠️ Known limitations
 
-1. Tap **Add PDFs**.
-2. Select one or more PDF files in the system picker.
-3. The selected files appear alphabetically under **All PDFs**.
-4. Tap a document to read it.
-5. Opened documents appear under **Recently opened**.
-6. Use the search icon inside the reader to search document text.
-7. Use the document menu to remove a PDF from Papertrail's private library.
+- Annotated Share/Print output is flattened to preserve its appearance; text in
+  the exported copy may no longer be selectable.
+- OCR and summarization are intentionally processed on-device and can take time
+  for very large scanned documents.
+- The repository does not contain signing keys or store credentials.
+- App Store and Google Play publication are not yet complete.
 
-Removing a document from Papertrail deletes the app's private copy. It does not delete the original file selected from Downloads, Drive, or another provider.
+## 🧭 Project structure
 
-## Store material
+```text
+lib/                 Application, reader, search, summary, and annotation code
+test/                Unit, contract, and widget tests
+integration_test/    Device-level integration tests
+android/             Android host application
+ios/                 iOS host application
+assets/branding/     Application branding
+store/               Store listing and privacy material
+tool/                Development utilities
+```
 
-Store copy and privacy language are available in the `store/` directory. Branding source files are under `assets/branding/`.
+## 🤝 Contributing
+
+Issues and pull requests are welcome.
+
+1. Fork the repository.
+2. Create a focused feature or fix branch.
+3. Run formatting, analysis, and tests.
+4. Explain the user impact and verification in the pull request.
+
+Please do not commit PDFs containing personal information, generated APKs,
+signing credentials, local SDK paths, or private keys.
+
+## 🏬 Store material
+
+- [Store listing](store/STORE_LISTING.md)
+- [Privacy policy](store/PRIVACY_POLICY.md)
