@@ -17,16 +17,16 @@
 > Google Play or the App Store. Release builds currently require your own
 > signing configuration.
 
-## Why Papertrail?
+## ✨ Why Papertrail?
 
 Papertrail is designed for people who want capable PDF reading without creating
 an account or sending their document library to a remote service. PDFs, search
 indexes, reading progress, signatures, annotations, and crash diagnostics stay
 on the device.
 
-## Highlights
+## 🚀 Highlights
 
-### Library and file organization
+### 🗂️ Library and file organization
 
 - Import PDFs with the system document picker or from a user-approved folder
 - Open PDFs sent through Android **Open with** and supported iOS document flows
@@ -37,7 +37,7 @@ on the device.
 - Sort by name, recent activity, document date, size, or page count
 - First-page thumbnails, file metadata, and responsive phone/tablet layouts
 
-### Search and smart reading
+### 🔎 Search and smart reading
 
 - Search filenames and text across the PDF library
 - Page-numbered result snippets and recent-search history
@@ -47,7 +47,7 @@ on the device.
 - Private on-device extractive summaries with progress and cancellation
 - Ranked important-information cards linked to their source pages
 
-### Reading experience
+### 📖 Reading experience
 
 - Select and copy PDF text
 - Search inside an open document with previous/next result navigation
@@ -61,7 +61,7 @@ on the device.
   keep-screen-awake controls
 - Configurable header, sorting, reader, notification, and navigation options
 
-### Annotations and signatures
+### ✍️ Annotations and signatures
 
 - Highlight, underline, strikethrough, freehand drawing, notes, shapes, and stamps
 - Draw reusable signatures or import signature images
@@ -70,7 +70,7 @@ on the device.
 - Undo, redo, atomic saving, and unsaved-change protection
 - Annotated Share and Print output through a flattened PDF copy
 
-## Privacy
+## 🔐 Privacy
 
 Papertrail does not require an account and does not include advertising,
 analytics, or tracking. Library metadata is stored in encrypted platform
@@ -84,16 +84,16 @@ another provider.
 
 See the full [Privacy Policy](store/PRIVACY_POLICY.md).
 
-## Platform status
+## 📱 Platform status
 
 | Platform | Status | Notes |
 |---|---|---|
 | Android | Actively tested | Emulator and physical-device workflows supported |
 | iOS | Source available | Requires macOS/Xcode signing and final physical-device verification |
 
-## Getting started
+## 🛠️ Getting started
 
-### Prerequisites
+### ✅ Prerequisites
 
 - Flutter 3.32.2 or a compatible newer stable release
 - Dart 3.8 or later
@@ -106,7 +106,7 @@ Verify your environment:
 flutter doctor -v
 ```
 
-### Clone and install dependencies
+### 📦 Clone and install dependencies
 
 ```sh
 git clone https://github.com/vkgpt11/Papertrail-PDF.git
@@ -114,7 +114,7 @@ cd Papertrail-PDF
 flutter pub get
 ```
 
-### Run the application
+### ▶️ Run the application
 
 List available devices:
 
@@ -135,7 +135,7 @@ flutter emulators
 flutter emulators --launch EMULATOR_ID
 ```
 
-## Testing
+## 🧪 Testing
 
 Format, analyze, and run the complete unit/widget suite:
 
@@ -155,9 +155,9 @@ The current suite covers document metadata, sorting and filters, search-index
 serialization, summaries, annotation persistence, signatures, responsive
 layouts, preferences, platform contracts, and annotated export.
 
-## Building Android
+## 🤖 Building Android
 
-### APK
+### 📲 APK
 
 ```sh
 flutter build apk --release
@@ -178,7 +178,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\build-release.ps1 -Format both
 ```
 
-### Google Play App Bundle
+### 🏪 Google Play App Bundle
 
 ```sh
 flutter build appbundle --release
@@ -196,7 +196,7 @@ build/app/outputs/bundle/release/app-release.aab
 > properties before uploading an App Bundle to Google Play. Never commit
 > keystores, passwords, or `key.properties`.
 
-## Building iOS
+## 🍎 Building iOS
 
 On macOS:
 
@@ -214,7 +214,7 @@ flutter build ipa --release
 iOS incoming-document behavior must be verified on a physical iPhone before an
 App Store release.
 
-## Known limitations
+## ⚠️ Known limitations
 
 - Annotated Share/Print output is flattened to preserve its appearance; text in
   the exported copy may no longer be selectable.
@@ -223,7 +223,7 @@ App Store release.
 - The repository does not contain signing keys or store credentials.
 - App Store and Google Play publication are not yet complete.
 
-## Project structure
+## 🧭 Project structure
 
 ```text
 lib/                 Application, reader, search, summary, and annotation code
@@ -236,7 +236,7 @@ store/               Store listing and privacy material
 tool/                Development utilities
 ```
 
-## Contributing
+## 🤝 Contributing
 
 Issues and pull requests are welcome.
 
@@ -248,7 +248,7 @@ Issues and pull requests are welcome.
 Please do not commit PDFs containing personal information, generated APKs,
 signing credentials, local SDK paths, or private keys.
 
-## Store material
+## 🏬 Store material
 
 - [Store listing](store/STORE_LISTING.md)
 - [Privacy policy](store/PRIVACY_POLICY.md)
