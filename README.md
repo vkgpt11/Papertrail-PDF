@@ -155,39 +155,59 @@ The current suite covers document metadata, sorting and filters, search-index
 serialization, summaries, annotation persistence, signatures, responsive
 layouts, preferences, platform contracts, and annotated export.
 
+The scanner implementation, remaining improvements, acceptance criteria, and
+required test coverage are tracked in
+[Scanner improvements](docs/SCANNER_IMPROVEMENTS.md).
+
 ## 🤖 Building Android
 
 ### 📲 APK
+
+On Windows, use the release script to automatically create a properly named
+APK. The script reads `version: X.Y.Z+N` from `pubspec.yaml`, builds the release,
+copies it into the `release` folder, and prints its SHA-256 checksum:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\build-release.ps1 -Format apk
+```
+
+Example output for `version: 1.5.2+27`:
+
+```text
+release\Papertrail-PDF-v1.5.2-build27.apk
+SHA-256: DB89944A845D9E0D6B37F6401793CF85E16F4983C8F5192E5A9509D4F9CC3D1A
+```
+
+The same script can create a Google Play App Bundle or both release formats:
+
+```powershell
+.\build-release.ps1 -Format aab
+.\build-release.ps1 -Format both
+```
+
+To build manually without the versioned filename:
 
 ```sh
 flutter build apk --release
 ```
 
-Output:
+Manual-build output:
 
 ```text
 build/app/outputs/flutter-apk/app-release.apk
 ```
 
-Windows users can generate a versioned APK, App Bundle, or both with:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\build-release.ps1 -Format apk
-.\build-release.ps1 -Format aab
-.\build-release.ps1 -Format both
-```
-
 ### 🏪 Google Play App Bundle
 
-```sh
-flutter build appbundle --release
+```powershell
+.\build-release.ps1 -Format aab
 ```
 
 Output:
 
 ```text
-build/app/outputs/bundle/release/app-release.aab
+release\Papertrail-PDF-vX.Y.Z-buildN.aab
 ```
 
 > [!WARNING]

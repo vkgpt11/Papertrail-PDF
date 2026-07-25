@@ -4,10 +4,12 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:crypto/crypto.dart';
+import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdfrx/pdfrx.dart';
 import 'package:printing/printing.dart';
@@ -25,6 +27,34 @@ import 'pdf_summary.dart';
 import 'horizontal_scroll_cue.dart';
 
 const _readerDeletedResult = -1;
+
+const appFontFamilies = <String, String?>{
+  'Sans Serif': 'sans-serif',
+  'Inter': 'Inter',
+  'Noto Sans': 'Noto Sans',
+  'Roboto': 'Roboto',
+  'Open Sans': 'Open Sans',
+  'Lato': 'Lato',
+  'Nunito Sans': 'Nunito Sans',
+  'Poppins': 'Poppins',
+  'Montserrat': 'Montserrat',
+  'DM Sans': 'DM Sans',
+  'Roboto Condensed': 'Roboto Condensed',
+};
+
+const appFontWeights = <String, int>{
+  'Regular': 400,
+  'Medium': 500,
+  'Semi-bold': 600,
+  'Bold': 700,
+};
+
+const appFontScales = <String, double>{
+  'Small': .9,
+  'Default': 1,
+  'Large': 1.15,
+  'Extra large': 1.3,
+};
 
 class PapertrailLogo extends StatelessWidget {
   const PapertrailLogo({this.size = 32, super.key});
@@ -279,42 +309,138 @@ class PapertrailApp extends StatefulWidget {
 
 class _PapertrailAppState extends State<PapertrailApp> {
   ThemeMode _themeMode = ThemeMode.system;
+  String? _fontFamily;
+  int _fontWeight = 400;
+  double _fontScale = 1;
 
-  void _toggleTheme() => setState(() {
-    _themeMode = _themeMode == ThemeMode.dark
-        ? ThemeMode.light
-        : ThemeMode.dark;
-  });
+  @override
+  void initState() {
+    super.initState();
+    _loadAppearance();
+  }
+
+  Future<void> _loadAppearance() async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedTheme = prefs.getString('appearance_theme_mode');
+    final savedFont = prefs.getString('appearance_font_family');
+    final savedWeight = prefs.getInt('appearance_font_weight');
+    final savedScale = prefs.getDouble('appearance_font_scale');
+    if (!mounted) return;
+    setState(() {
+      _themeMode =
+          ThemeMode.values
+              .where((mode) => mode.name == savedTheme)
+              .firstOrNull ??
+          ThemeMode.system;
+      _fontFamily = appFontFamilies.containsValue(savedFont) ? savedFont : null;
+      _fontWeight = appFontWeights.containsValue(savedWeight)
+          ? savedWeight!
+          : 400;
+      _fontScale = appFontScales.containsValue(savedScale) ? savedScale! : 1;
+    });
+  }
+
+  Future<void> _setThemeMode(ThemeMode mode) async {
+    setState(() => _themeMode = mode);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('appearance_theme_mode', mode.name);
+  }
+
+  Future<void> _setFontFamily(String? family) async {
+    setState(() => _fontFamily = family);
+    final prefs = await SharedPreferences.getInstance();
+    if (family == null) {
+      await prefs.remove('appearance_font_family');
+    } else {
+      await prefs.setString('appearance_font_family', family);
+    }
+  }
+
+  Future<void> _setFontWeight(int weight) async {
+    setState(() => _fontWeight = weight);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('appearance_font_weight', weight);
+  }
+
+  Future<void> _setFontScale(double scale) async {
+    setState(() => _fontScale = scale);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('appearance_font_scale', scale);
+  }
+
+  TextTheme _applyAppearance(TextTheme theme) {
+    TextStyle? apply(TextStyle? style) => style?.copyWith(
+      fontFamily: _fontFamily,
+      fontWeight: FontWeight.values[_fontWeight ~/ 100 - 1],
+    );
+    return theme.copyWith(
+      displayLarge: apply(theme.displayLarge),
+      displayMedium: apply(theme.displayMedium),
+      displaySmall: apply(theme.displaySmall),
+      headlineLarge: apply(theme.headlineLarge),
+      headlineMedium: apply(theme.headlineMedium),
+      headlineSmall: apply(theme.headlineSmall),
+      titleLarge: apply(theme.titleLarge),
+      titleMedium: apply(theme.titleMedium),
+      titleSmall: apply(theme.titleSmall),
+      bodyLarge: apply(theme.bodyLarge),
+      bodyMedium: apply(theme.bodyMedium),
+      bodySmall: apply(theme.bodySmall),
+      labelLarge: apply(theme.labelLarge),
+      labelMedium: apply(theme.labelMedium),
+      labelSmall: apply(theme.labelSmall),
+    );
+  }
+
+  ThemeData _theme(Brightness brightness) {
+    const seed = Color(0xFF5B5BD6);
+    final dark = brightness == Brightness.dark;
+    final base = ThemeData(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: seed,
+        brightness: brightness,
+      ),
+      useMaterial3: true,
+      fontFamily: _fontFamily,
+      textSelectionTheme: TextSelectionThemeData(
+        selectionColor: seed.withValues(alpha: dark ? .42 : .32),
+        selectionHandleColor: seed,
+      ),
+      scaffoldBackgroundColor: dark
+          ? const Color(0xFF111116)
+          : const Color(0xFFF7F7FB),
+    );
+    return base.copyWith(textTheme: _applyAppearance(base.textTheme));
+  }
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF5B5BD6);
     return MaterialApp(
       title: 'Papertrail PDF',
       debugShowCheckedModeBanner: false,
       themeMode: _themeMode,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: seed),
-        useMaterial3: true,
-        textSelectionTheme: TextSelectionThemeData(
-          selectionColor: seed.withValues(alpha: .32),
-          selectionHandleColor: seed,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF7F7FB),
+      builder: (context, child) {
+        final mediaQuery = MediaQuery.of(context);
+        final systemScale = mediaQuery.textScaler.scale(1);
+        return MediaQuery(
+          data: mediaQuery.copyWith(
+            textScaler: TextScaler.linear(systemScale * _fontScale),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      home: LibraryScreen(
+        themeMode: _themeMode,
+        fontFamily: _fontFamily,
+        fontWeight: _fontWeight,
+        fontScale: _fontScale,
+        onThemeModeChanged: _setThemeMode,
+        onFontFamilyChanged: _setFontFamily,
+        onFontWeightChanged: _setFontWeight,
+        onFontScaleChanged: _setFontScale,
       ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: seed,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-        textSelectionTheme: TextSelectionThemeData(
-          selectionColor: seed.withValues(alpha: .42),
-          selectionHandleColor: seed,
-        ),
-        scaffoldBackgroundColor: const Color(0xFF111116),
-      ),
-      home: LibraryScreen(onToggleTheme: _toggleTheme),
     );
   }
 }
@@ -762,6 +888,7 @@ enum ReaderTool {
   fullScreen,
   readingExperience,
   share,
+  rename,
   print,
   delete,
 }
@@ -775,6 +902,7 @@ const essentialReaderTools = {
   ReaderTool.fullScreen,
   ReaderTool.readingExperience,
   ReaderTool.share,
+  ReaderTool.rename,
 };
 
 String readerToolLabel(ReaderTool tool) => switch (tool) {
@@ -794,6 +922,7 @@ String readerToolLabel(ReaderTool tool) => switch (tool) {
   ReaderTool.fullScreen => 'Full screen',
   ReaderTool.readingExperience => 'Reading experience',
   ReaderTool.share => 'Share PDF',
+  ReaderTool.rename => 'Rename PDF',
   ReaderTool.print => 'Print',
   ReaderTool.delete => 'Delete PDF',
 };
@@ -815,34 +944,65 @@ IconData readerToolIcon(ReaderTool tool) => switch (tool) {
   ReaderTool.fullScreen => Icons.fullscreen_rounded,
   ReaderTool.readingExperience => Icons.display_settings_rounded,
   ReaderTool.share => Icons.share_outlined,
+  ReaderTool.rename => Icons.drive_file_rename_outline,
   ReaderTool.print => Icons.print_outlined,
   ReaderTool.delete => Icons.delete_outline_rounded,
 };
 
-enum HeaderAction { searchFilters, createFolder, scanFolder, sort, theme }
+enum HeaderAction {
+  documentScanner,
+  searchFilters,
+  createFolder,
+  scanFolder,
+  sort,
+}
 
-const essentialHeaderActions = {HeaderAction.sort, HeaderAction.theme};
+enum PapertrailScanSource { camera, gallery, cameraAndGallery }
+
+enum PapertrailScanMode { automatic, manualCrop, filterControls }
+
+const essentialHeaderActions = {
+  HeaderAction.documentScanner,
+  HeaderAction.sort,
+};
 
 String headerActionLabel(HeaderAction action) => switch (action) {
+  HeaderAction.documentScanner => 'Scan paper document',
   HeaderAction.searchFilters => 'Search filters',
   HeaderAction.createFolder => 'Create library folder',
   HeaderAction.scanFolder => 'Scan device folder',
   HeaderAction.sort => 'Sort PDFs',
-  HeaderAction.theme => 'Change theme',
 };
 
 IconData headerActionIcon(HeaderAction action) => switch (action) {
+  HeaderAction.documentScanner => Icons.document_scanner_outlined,
   HeaderAction.searchFilters => Icons.filter_alt_outlined,
   HeaderAction.createFolder => Icons.create_new_folder_outlined,
   HeaderAction.scanFolder => Icons.drive_folder_upload_outlined,
   HeaderAction.sort => Icons.sort_rounded,
-  HeaderAction.theme => Icons.palette_outlined,
 };
 
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({required this.onToggleTheme, super.key});
+  const LibraryScreen({
+    required this.themeMode,
+    required this.fontFamily,
+    required this.fontWeight,
+    required this.fontScale,
+    required this.onThemeModeChanged,
+    required this.onFontFamilyChanged,
+    required this.onFontWeightChanged,
+    required this.onFontScaleChanged,
+    super.key,
+  });
 
-  final VoidCallback onToggleTheme;
+  final ThemeMode themeMode;
+  final String? fontFamily;
+  final int fontWeight;
+  final double fontScale;
+  final ValueChanged<ThemeMode> onThemeModeChanged;
+  final ValueChanged<String?> onFontFamilyChanged;
+  final ValueChanged<int> onFontWeightChanged;
+  final ValueChanged<double> onFontScaleChanged;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -879,6 +1039,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String _libraryQuery = '';
   bool _loading = true;
   bool _scanning = false;
+  bool _scanningDocument = false;
+  String _appVersion = '';
+  PapertrailScanMode _scanMode = PapertrailScanMode.automatic;
+  bool _scanSinglePage = false;
+  int _scanPageLimit = 20;
+  PapertrailScanSource _scanSource = PapertrailScanSource.camera;
 
   @override
   void initState() {
@@ -898,13 +1064,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _load() async {
-    final results = await Future.wait([_store.load(), _store.loadFolders()]);
+    final results = await Future.wait([
+      _store.load(),
+      _store.loadFolders(),
+      PackageInfo.fromPlatform(),
+    ]);
     final documents = results[0] as List<RecentDocument>;
     final folders = results[1] as List<String>;
+    final packageInfo = results[2] as PackageInfo;
     if (mounted) {
       setState(() {
         _documents = documents;
         _folders = folders;
+        _appVersion =
+            'Version ${packageInfo.version} (Build ${packageInfo.buildNumber})';
         _loading = false;
       });
       final prefs = await SharedPreferences.getInstance();
@@ -963,6 +1136,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _pdfSummariesEnabled = prefs.getBool('pdf_summaries_enabled') ?? false;
         _importantHighlightsEnabled =
             prefs.getBool('important_highlights_enabled') ?? false;
+        final savedScanMode = prefs.getString('scan_capture_mode');
+        _scanMode =
+            PapertrailScanMode.values
+                .where((mode) => mode.name == savedScanMode)
+                .firstOrNull ??
+            ((prefs.getBool('scan_manual_crop') ?? false)
+                ? PapertrailScanMode.manualCrop
+                : PapertrailScanMode.automatic);
+        _scanSinglePage = prefs.getBool('scan_single_page') ?? false;
+        _scanPageLimit =
+            const [5, 10, 20, 50].contains(prefs.getInt('scan_page_limit'))
+            ? prefs.getInt('scan_page_limit')!
+            : 20;
+        _scanSource =
+            PapertrailScanSource.values
+                .where(
+                  (source) =>
+                      source.name == prefs.getString('scan_capture_source'),
+                )
+                .firstOrNull ??
+            PapertrailScanSource.camera;
         _sort = savedSort != null && _enabledSorts.contains(savedSort)
             ? savedSort
             : _enabledSorts.first;
@@ -1107,6 +1301,112 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   Widget _buildDrawerSettings() => Column(
     children: [
+      ExpansionTile(
+        key: const PageStorageKey('appearance-settings'),
+        initiallyExpanded: true,
+        maintainState: true,
+        leading: const Icon(Icons.palette_outlined),
+        title: const Text(
+          'Appearance',
+          style: TextStyle(fontWeight: FontWeight.w700),
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 12, 8),
+            child: DropdownButtonFormField<ThemeMode>(
+              value: widget.themeMode,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Theme',
+                prefixIcon: Icon(Icons.brightness_6_outlined),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: ThemeMode.system,
+                  child: Text('Use device setting'),
+                ),
+                DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
+                DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+              ],
+              onChanged: (value) {
+                if (value != null) widget.onThemeModeChanged(value);
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 12, 8),
+            child: DropdownButtonFormField<String?>(
+              value: widget.fontFamily,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Application font',
+                prefixIcon: Icon(Icons.font_download_outlined),
+              ),
+              items: appFontFamilies.entries
+                  .map(
+                    (entry) => DropdownMenuItem<String?>(
+                      value: entry.value,
+                      child: Text(
+                        entry.key,
+                        style: TextStyle(fontFamily: entry.value),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: widget.onFontFamilyChanged,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 12, 12),
+            child: DropdownButtonFormField<int>(
+              value: widget.fontWeight,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Font weight',
+                prefixIcon: Icon(Icons.format_bold_rounded),
+              ),
+              items: appFontWeights.entries
+                  .map(
+                    (entry) => DropdownMenuItem<int>(
+                      value: entry.value,
+                      child: Text(
+                        entry.key,
+                        style: TextStyle(
+                          fontWeight: FontWeight.values[entry.value ~/ 100 - 1],
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) widget.onFontWeightChanged(value);
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 12, 12),
+            child: DropdownButtonFormField<double>(
+              value: widget.fontScale,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Font size',
+                prefixIcon: Icon(Icons.format_size_rounded),
+              ),
+              items: appFontScales.entries
+                  .map(
+                    (entry) => DropdownMenuItem<double>(
+                      value: entry.value,
+                      child: Text(entry.key),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) widget.onFontScaleChanged(value);
+              },
+            ),
+          ),
+        ],
+      ),
       ExpansionTile(
         key: const PageStorageKey('general-settings'),
         initiallyExpanded: true,
@@ -1317,7 +1617,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     Overlay.of(context).insert(openingOverlay);
     try {
       final document = await _store.importExternalPdf(path, name, _documents);
-      if (!_documents.any((item) => item.path == document.path)) {
+      if (_documents.any((item) => item.path == document.path)) {
+        setState(() {
+          _documents = _documents
+              .map((item) => item.path == document.path ? document : item)
+              .toList();
+        });
+        await _store.save(_documents);
+      } else {
         setState(() => _documents = [document, ..._documents]);
         await _store.save(_documents);
         unawaited(_indexDocuments([document]));
@@ -1368,6 +1675,403 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  Future<void> _showScannerOptions() async {
+    var scanMode = _scanMode;
+    var singlePage = _scanSinglePage;
+    var pageLimit = _scanPageLimit;
+    var source = _scanSource;
+    final selection =
+        await showModalBottomSheet<
+          ({
+            PapertrailScanMode scanMode,
+            bool singlePage,
+            int pageLimit,
+            PapertrailScanSource source,
+          })
+        >(
+          context: context,
+          showDragHandle: true,
+          isScrollControlled: true,
+          builder: (context) => StatefulBuilder(
+            builder: (context, setSheetState) => SafeArea(
+              child: SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  0,
+                  20,
+                  20 + MediaQuery.viewInsetsOf(context).bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Scan a document',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Choose how Papertrail should capture each page.',
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Capture mode',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ChoiceChip(
+                          avatar: const Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 18,
+                          ),
+                          label: const Text('Automatic'),
+                          selected: scanMode == PapertrailScanMode.automatic,
+                          onSelected: (_) => setSheetState(
+                            () => scanMode = PapertrailScanMode.automatic,
+                          ),
+                        ),
+                        ChoiceChip(
+                          avatar: const Icon(Icons.crop_free_rounded, size: 18),
+                          label: const Text('Manual crop'),
+                          selected: scanMode == PapertrailScanMode.manualCrop,
+                          onSelected: (_) => setSheetState(
+                            () => scanMode = PapertrailScanMode.manualCrop,
+                          ),
+                        ),
+                        ChoiceChip(
+                          avatar: const Icon(Icons.filter_rounded, size: 18),
+                          label: const Text('Filter controls · Android'),
+                          selected:
+                              scanMode == PapertrailScanMode.filterControls,
+                          onSelected: Platform.isIOS
+                              ? null
+                              : (_) => setSheetState(
+                                  () => scanMode =
+                                      PapertrailScanMode.filterControls,
+                                ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(switch (scanMode) {
+                      PapertrailScanMode.automatic =>
+                        'Detect, crop, and enhance document edges automatically.',
+                      PapertrailScanMode.manualCrop =>
+                        'Capture, then drag all four corners to adjust width and height.',
+                      PapertrailScanMode.filterControls =>
+                        'Choose original, enhanced color, grayscale, or black and white in the Android scanner.',
+                    }),
+                    if (Platform.isIOS)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Filter controls are unavailable on iOS because VisionKit does not expose them.',
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Pages',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: true,
+                          icon: Icon(Icons.looks_one_outlined),
+                          label: Text('Single page'),
+                        ),
+                        ButtonSegment(
+                          value: false,
+                          icon: Icon(Icons.library_books_outlined),
+                          label: Text('Multiple pages'),
+                        ),
+                      ],
+                      selected: {singlePage},
+                      onSelectionChanged: (value) =>
+                          setSheetState(() => singlePage = value.first),
+                    ),
+                    if (!singlePage) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int>(
+                        value: pageLimit,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Maximum pages',
+                          prefixIcon: Icon(Icons.numbers_rounded),
+                        ),
+                        items: const [5, 10, 20, 50]
+                            .map(
+                              (value) => DropdownMenuItem(
+                                value: value,
+                                child: Text('$value pages'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setSheetState(() => pageLimit = value);
+                          }
+                        },
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    DropdownButtonFormField<PapertrailScanSource>(
+                      value: source,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Capture source',
+                        prefixIcon: Icon(Icons.add_a_photo_outlined),
+                      ),
+                      items: const [
+                        DropdownMenuItem(
+                          value: PapertrailScanSource.camera,
+                          child: Text('Camera'),
+                        ),
+                        DropdownMenuItem(
+                          value: PapertrailScanSource.gallery,
+                          child: Text('Gallery'),
+                        ),
+                        DropdownMenuItem(
+                          value: PapertrailScanSource.cameraAndGallery,
+                          child: Text('Camera and Gallery'),
+                        ),
+                      ],
+                      onChanged: (value) {
+                        if (value != null) setSheetState(() => source = value);
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      onPressed: () => Navigator.pop(context, (
+                        scanMode: scanMode,
+                        singlePage: singlePage,
+                        pageLimit: pageLimit,
+                        source: source,
+                      )),
+                      icon: const Icon(Icons.document_scanner_outlined),
+                      label: const Text('Start scanning'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+    if (selection != null && mounted) {
+      setState(() {
+        _scanMode = selection.scanMode;
+        _scanSinglePage = selection.singlePage;
+        _scanPageLimit = selection.pageLimit;
+        _scanSource = selection.source;
+      });
+      await _saveScannerPreferences();
+      await _scanDocument(
+        scanMode: selection.scanMode,
+        pageLimit: selection.singlePage ? 1 : selection.pageLimit,
+        source: selection.source,
+      );
+    }
+  }
+
+  Future<void> _saveScannerPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    await Future.wait([
+      prefs.setString('scan_capture_mode', _scanMode.name),
+      prefs.setBool('scan_single_page', _scanSinglePage),
+      prefs.setInt('scan_page_limit', _scanPageLimit),
+      prefs.setString('scan_capture_source', _scanSource.name),
+    ]);
+  }
+
+  ScannerSource _nativeScannerSource(PapertrailScanSource source) =>
+      switch (source) {
+        PapertrailScanSource.camera => ScannerSource.camera,
+        PapertrailScanSource.gallery => ScannerSource.gallery,
+        PapertrailScanSource.cameraAndGallery => ScannerSource.cameraAndGallery,
+      };
+
+  AndroidScannerMode _nativeScannerMode(PapertrailScanMode mode) =>
+      switch (mode) {
+        PapertrailScanMode.automatic => AndroidScannerMode.full,
+        PapertrailScanMode.manualCrop => AndroidScannerMode.base,
+        PapertrailScanMode.filterControls => AndroidScannerMode.baseWithFilter,
+      };
+
+  Future<({String name, String? folder, bool favorite})?>
+  _confirmScannedPdfDetails() async {
+    final now = DateTime.now();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    final suggestedName =
+        'Scan ${now.year}-${twoDigits(now.month)}-${twoDigits(now.day)} '
+        '${twoDigits(now.hour)}-${twoDigits(now.minute)}-${twoDigits(now.second)}';
+    final controller = TextEditingController(text: suggestedName);
+    String? folder;
+    var favorite = false;
+    final result =
+        await showDialog<({String name, String? folder, bool favorite})>(
+          context: context,
+          builder: (context) => StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: const Text('Save scanned PDF'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: controller,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      decoration: const InputDecoration(
+                        labelText: 'File name',
+                        prefixIcon: Icon(Icons.drive_file_rename_outline),
+                        suffixText: '.pdf',
+                      ),
+                    ),
+                    if (_folders.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<String?>(
+                        value: folder,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Library folder',
+                          prefixIcon: Icon(Icons.folder_outlined),
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Uncategorized'),
+                          ),
+                          ..._folders.map(
+                            (item) => DropdownMenuItem<String?>(
+                              value: item,
+                              child: Text(item),
+                            ),
+                          ),
+                        ],
+                        onChanged: (value) =>
+                            setDialogState(() => folder = value),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Add to favorites'),
+                      secondary: const Icon(Icons.star_outline_rounded),
+                      value: favorite,
+                      onChanged: (value) =>
+                          setDialogState(() => favorite = value ?? false),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: () {
+                    var name = controller.text.trim();
+                    if (name.isEmpty) return;
+                    name = name.replaceFirst(
+                      RegExp(r'(?:\.pdf)+$', caseSensitive: false),
+                      '',
+                    );
+                    Navigator.pop(context, (
+                      name: '$name.pdf',
+                      folder: folder,
+                      favorite: favorite,
+                    ));
+                  },
+                  icon: const Icon(Icons.save_outlined),
+                  label: const Text('Save PDF'),
+                ),
+              ],
+            ),
+          ),
+        );
+    controller.dispose();
+    return result;
+  }
+
+  Future<void> _scanDocument({
+    required PapertrailScanMode scanMode,
+    required int pageLimit,
+    required PapertrailScanSource source,
+  }) async {
+    if (_scanningDocument) return;
+    setState(() => _scanningDocument = true);
+    try {
+      final scannedPaths = await CunningDocumentScanner.getPictures(
+        asPdf: true,
+        noOfPages: pageLimit,
+        scannerSource: _nativeScannerSource(source),
+        androidScannerMode: _nativeScannerMode(scanMode),
+      );
+      if (scannedPaths == null || scannedPaths.isEmpty || !mounted) return;
+
+      final details = await _confirmScannedPdfDetails();
+      if (details == null || !mounted) return;
+      var document = await _store.importExternalPdf(
+        scannedPaths.first,
+        details.name,
+        _documents,
+      );
+      document = document.copyWith(
+        folder: details.folder,
+        isFavorite: details.favorite,
+      );
+      if (!_documents.any((item) => item.path == document.path)) {
+        setState(() => _documents = [document, ..._documents]);
+        await _store.save(_documents);
+        unawaited(_indexDocuments([document]));
+      }
+      if (!mounted) return;
+      PapertrailNotice.show(
+        context,
+        'Scan saved to your library.',
+        icon: Icons.document_scanner_outlined,
+      );
+      await _open(document);
+    } on CunningDocumentScannerException catch (error) {
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          error.message.isEmpty
+              ? 'Could not scan the document.'
+              : error.message,
+          isError: true,
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'Could not scan the document. Check camera access and try again.',
+          isError: true,
+        );
+      }
+    } finally {
+      try {
+        await CunningDocumentScanner.cleanCache();
+      } catch (_) {
+        // Cache cleanup must not hide a successfully saved scan.
+      }
+      if (mounted) setState(() => _scanningDocument = false);
+    }
+  }
+
   Future<void> _import() async {
     try {
       final result = await _store.importPdfs(_documents);
@@ -1398,7 +2102,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       PageRouteBuilder<int>(
         transitionDuration: const Duration(milliseconds: 280),
         reverseTransitionDuration: const Duration(milliseconds: 220),
-        pageBuilder: (_, animation, __) => ReaderScreen(document: document),
+        pageBuilder: (_, animation, __) =>
+            ReaderScreen(document: document, onRename: _rename),
         transitionsBuilder: (_, animation, __, child) {
           final curved = CurvedAnimation(
             parent: animation,
@@ -1418,23 +2123,33 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
     );
     if (page == null || !mounted) return;
+    final currentDocument =
+        _documents
+            .where(
+              (item) =>
+                  item.fingerprint != null &&
+                  item.fingerprint == document.fingerprint,
+            )
+            .firstOrNull ??
+        document;
     if (page == _readerDeletedResult) {
       setState(
-        () => _documents.removeWhere((item) => item.path == document.path),
+        () =>
+            _documents.removeWhere((item) => item.path == currentDocument.path),
       );
       await _store.save(_documents);
-      await deleteDocumentArtifacts(document.path);
-      await _searchIndex.remove(document.path);
+      await deleteDocumentArtifacts(currentDocument.path);
+      await _searchIndex.remove(currentDocument.path);
       return;
     }
     setState(() {
       _documents = [
-        document.copyWith(
+        currentDocument.copyWith(
           page: page,
           openedAt: DateTime.now(),
           hasBeenOpened: true,
         ),
-        ..._documents.where((item) => item.path != document.path),
+        ..._documents.where((item) => item.path != currentDocument.path),
       ];
     });
     await _store.save(_documents);
@@ -1476,7 +2191,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _searchIndex.remove(document.path);
   }
 
-  Future<void> _rename(RecentDocument document) async {
+  Future<RecentDocument?> _rename(RecentDocument document) async {
     final currentName = document.name.toLowerCase().endsWith('.pdf')
         ? document.name.substring(0, document.name.length - 4)
         : document.name;
@@ -1509,11 +2224,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
     controller.dispose();
     if (requestedName == null || requestedName.trim().isEmpty || !mounted) {
-      return;
+      return null;
     }
     try {
       final renamed = await _store.rename(document, requestedName);
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _documents = _documents
             .map((item) => item.path == document.path ? renamed : item)
@@ -1521,6 +2236,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       });
       await _store.save(_documents);
       await _searchIndex.rename(document.path, renamed.path);
+      return renamed;
     } catch (_) {
       if (mounted) {
         PapertrailNotice.show(
@@ -1529,6 +2245,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           isError: true,
         );
       }
+      return null;
     }
   }
 
@@ -1883,6 +2600,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   children: [_buildDrawerSettings()],
                 ),
               ),
+              if (_appVersion.isNotEmpty) ...[
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        _appVersion,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1936,6 +2675,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 ),
               ]
             : [
+                if (_enabledHeaderActions.contains(
+                  HeaderAction.documentScanner,
+                ))
+                  IconButton(
+                    tooltip: 'Scan paper document',
+                    onPressed: _scanningDocument ? null : _showScannerOptions,
+                    icon: _scanningDocument
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.document_scanner_outlined),
+                  ),
                 if (_enabledHeaderActions.contains(HeaderAction.searchFilters))
                   IconButton(
                     tooltip: 'Search filters',
@@ -1983,12 +2735,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           ),
                         )
                         .toList(),
-                  ),
-                if (_enabledHeaderActions.contains(HeaderAction.theme))
-                  IconButton(
-                    tooltip: 'Change theme',
-                    onPressed: widget.onToggleTheme,
-                    icon: const Icon(Icons.dark_mode_outlined),
                   ),
               ],
       ),
@@ -2042,6 +2788,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       onPressed: _import,
                       icon: const Icon(Icons.folder_open),
                       label: const Text('Choose PDFs'),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _scanningDocument ? null : _showScannerOptions,
+                      icon: const Icon(Icons.document_scanner_outlined),
+                      label: const Text('Scan a document'),
                     ),
                   ],
                 ),
@@ -2337,8 +3089,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 class ReaderScreen extends StatefulWidget {
-  const ReaderScreen({required this.document, super.key});
+  const ReaderScreen({
+    required this.document,
+    required this.onRename,
+    super.key,
+  });
   final RecentDocument document;
+  final Future<RecentDocument?> Function(RecentDocument document) onRename;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -2354,7 +3111,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   late final PdfTextSearcher _searcher;
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
-  late int _page = widget.document.page;
+  late RecentDocument _document;
+  late int _page;
   int _pageCount = 0;
   bool _chromeVisible = true;
   bool _searchVisible = false;
@@ -2373,6 +3131,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _showTextSelectionMagnifier = false;
   bool _pdfSummariesEnabled = false;
   bool _importantHighlightsEnabled = false;
+  bool _doubleTapZoomedIn = false;
   bool _summaryLoading = false;
   String? _documentPassword;
   Set<ReaderTool> _enabledReaderTools = {...essentialReaderTools};
@@ -2381,6 +3140,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void initState() {
     super.initState();
+    _document = widget.document;
+    _page = _document.page;
     _searcher = PdfTextSearcher(_controller);
     _searcher.addListener(_onSearchChanged);
     _loadBookmarks();
@@ -2406,8 +3167,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     super.dispose();
   }
 
-  String get _readerPreferenceKey =>
-      widget.document.fingerprint ?? widget.document.path;
+  String get _readerPreferenceKey => _document.fingerprint ?? _document.path;
 
   Future<void> _loadReaderPreferences() async {
     final prefs = await SharedPreferences.getInstance();
@@ -2469,7 +3229,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   String get _bookmarkKey =>
-      'bookmarks_${widget.document.fingerprint ?? widget.document.path}';
+      'bookmarks_${_document.fingerprint ?? _document.path}';
 
   Future<void> _loadBookmarks() async {
     final prefs = await SharedPreferences.getInstance();
@@ -2582,12 +3342,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   void _fitPage() {
     final matrix = _controller.calcMatrixForFit(pageNumber: _page);
-    if (matrix != null) _controller.value = matrix;
+    if (matrix != null) {
+      _controller.value = matrix;
+      _doubleTapZoomedIn = false;
+    }
   }
 
   void _fitWidth() {
     final matrix = _controller.calcMatrixFitWidthForPage(pageNumber: _page);
-    if (matrix != null) _controller.value = matrix;
+    if (matrix != null) {
+      _controller.value = matrix;
+      _doubleTapZoomedIn = false;
+    }
   }
 
   Future<void> _toggleFullScreen() async {
@@ -2602,12 +3368,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
     try {
       if (_annotationsDirty) await _annotationKey.currentState?.save();
       final exported = await const AnnotationExporter().export(
-        widget.document.path,
+        _document.path,
         password: _documentPassword,
       );
       final bytes = await exported.readAsBytes();
       await Printing.layoutPdf(
-        name: widget.document.name,
+        name: _document.name,
         onLayout: (_) async => bytes,
       );
     } catch (_) {
@@ -2625,11 +3391,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     try {
       if (_annotationsDirty) await _annotationKey.currentState?.save();
       final exported = await const AnnotationExporter().export(
-        widget.document.path,
+        _document.path,
         password: _documentPassword,
       );
       await SharePlus.instance.share(
-        ShareParams(files: [XFile(exported.path)], text: widget.document.name),
+        ShareParams(files: [XFile(exported.path)], text: _document.name),
       );
     } catch (_) {
       if (mounted) {
@@ -2643,13 +3409,38 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
+  Future<void> _renameOpenDocument() async {
+    if (_annotationsDirty) {
+      try {
+        await _annotationKey.currentState?.save();
+      } catch (_) {
+        if (mounted) {
+          PapertrailNotice.show(
+            context,
+            'Save annotations before renaming this PDF.',
+            isError: true,
+          );
+        }
+        return;
+      }
+    }
+    final renamed = await widget.onRename(_document);
+    if (renamed == null || !mounted) return;
+    setState(() => _document = renamed);
+    PapertrailNotice.show(
+      context,
+      'PDF renamed.',
+      icon: Icons.drive_file_rename_outline,
+    );
+  }
+
   Future<void> _deleteOpenDocument() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete this PDF?'),
         content: Text(
-          '"${widget.document.name}" will be removed from Papertrail and its '
+          '"${_document.name}" will be removed from Papertrail and its '
           'private device copy will be deleted. The original source file is '
           'not affected.',
         ),
@@ -2840,11 +3631,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Future<void> _toggleDoubleTapZoom(Offset documentPosition) async {
     if (!_controller.isReady) return;
-    final minimumZoom = _controller.minScale;
-    final isZoomedIn = _controller.currentZoom > minimumZoom * 1.25;
-    final targetZoom = isZoomedIn
-        ? minimumZoom
-        : math.min(minimumZoom * 2, _controller.params.maxScale);
+    final fitMatrix = _controller.calcMatrixForFit(pageNumber: _page);
+    if (fitMatrix == null) return;
+
+    if (_doubleTapZoomedIn) {
+      _doubleTapZoomedIn = false;
+      await _controller.goTo(fitMatrix);
+      return;
+    }
+
+    final currentZoom = _controller.currentZoom;
+    final targetZoom = math.min(currentZoom * 2, _controller.params.maxScale);
+    _doubleTapZoomedIn = true;
     await _controller.setZoom(documentPosition, targetZoom);
   }
 
@@ -2923,7 +3721,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _saveRecoveryPage(int page) async {
-    final id = widget.document.fingerprint;
+    final id = _document.fingerprint;
     if (id == null) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('resume_$id', page);
@@ -3083,7 +3881,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     await Future<void>.delayed(Duration.zero);
     try {
       final result = await PdfSummaryService().summarize(
-        widget.document.path,
+        _document.path,
         password: _documentPassword,
         onProgress: (completed, total) {
           progress.value = (completed, total);
@@ -3196,6 +3994,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       ReaderTool.fullScreen: 'fullscreen',
       ReaderTool.readingExperience: 'display',
       ReaderTool.share: 'share',
+      ReaderTool.rename: 'rename',
       ReaderTool.print: 'print',
       ReaderTool.delete: 'delete',
     };
@@ -3315,7 +4114,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                         onChanged: (query) => _searcher.startTextSearch(query),
                       )
                     : Text(
-                        widget.document.name,
+                        _document.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -3435,6 +4234,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                                   _showDisplaySettings();
                                 case 'share':
                                   _shareOpenDocument();
+                                case 'rename':
+                                  _renameOpenDocument();
                                 case 'print':
                                   _printDocument();
                                 case 'delete':
@@ -3521,7 +4322,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     ],
                   }),
                   child: PdfViewer.file(
-                    widget.document.path,
+                    _document.path,
                     key: ValueKey(_viewMode),
                     passwordProvider: _passwordProvider,
                     controller: _controller,
@@ -3569,7 +4370,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
                       },
                       onPageChanged: (page) {
                         if (page == null) return;
-                        setState(() => _page = page);
+                        setState(() {
+                          _page = page;
+                          _doubleTapZoomedIn = false;
+                        });
                         _saveRecoveryPage(page);
                       },
                       onGeneralTap: (_, __, details) {
@@ -3597,7 +4401,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             Positioned.fill(
               child: AnnotationLayer(
                 key: _annotationKey,
-                pdfPath: widget.document.path,
+                pdfPath: _document.path,
                 page: _page,
                 enabled: _annotationMode,
                 onDirtyChanged: (dirty) {

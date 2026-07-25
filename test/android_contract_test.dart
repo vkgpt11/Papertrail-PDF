@@ -11,6 +11,7 @@ void main() {
     expect(manifest, contains('android.intent.action.SEND'));
     expect(manifest, contains('application/pdf'));
     expect(manifest, contains('android.intent.category.BROWSABLE'));
+    expect(manifest, contains('android.permission.CAMERA'));
   });
 
   test('iOS declares PDF document support', () {
@@ -18,6 +19,101 @@ void main() {
     expect(plist, contains('CFBundleDocumentTypes'));
     expect(plist, contains('com.adobe.pdf'));
     expect(plist, contains('LSSupportsOpeningDocumentsInPlace'));
+    expect(plist, contains('NSCameraUsageDescription'));
+  });
+
+  test('library can scan multi-page documents into persistent PDFs', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    expect(pubspec, contains('cunning_document_scanner:'));
+    expect(source, contains('CunningDocumentScanner.getPictures('));
+    expect(source, contains('asPdf: true'));
+    expect(source, contains('noOfPages: pageLimit'));
+    expect(source, contains("'Manual crop'"));
+    expect(source, contains('AndroidScannerMode.base'));
+    expect(source, contains('AndroidScannerMode.full'));
+    expect(source, contains('AndroidScannerMode.baseWithFilter'));
+    expect(source, contains("'Filter controls · Android'"));
+    expect(source, contains("'scan_capture_mode'"));
+    expect(
+      source,
+      contains(
+        "'Capture, then drag all four corners to adjust width and height.'",
+      ),
+    );
+    expect(source, contains('HeaderAction.documentScanner'));
+    expect(source, contains("'Scan saved to your library.'"));
+    expect(source, contains('CunningDocumentScanner.cleanCache()'));
+    expect(source, contains("'Single page'"));
+    expect(source, contains("'Multiple pages'"));
+    expect(source, contains("'Maximum pages'"));
+    expect(source, contains("'Camera and Gallery'"));
+    expect(source, contains("'scan_manual_crop'"));
+    expect(source, contains("'scan_single_page'"));
+    expect(source, contains("'scan_page_limit'"));
+    expect(source, contains("'scan_capture_source'"));
+    expect(source, contains("'Save scanned PDF'"));
+    expect(source, contains("'Library folder'"));
+    expect(source, contains("'Add to favorites'"));
+    expect(source, contains("RegExp(r'(?:\\.pdf)+\$'"));
+    expect(source, contains('folder: details.folder'));
+    expect(source, contains('isFavorite: details.favorite'));
+    final requirements = File(
+      'docs/SCANNER_IMPROVEMENTS.md',
+    ).readAsStringSync();
+    expect(
+      requirements,
+      contains('- [x] Choose single-page or multi-page scanning.'),
+    );
+  });
+
+  test('settings display the installed release and build number', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    expect(source, contains('PackageInfo.fromPlatform()'));
+    expect(
+      source,
+      contains(
+        "'Version \${packageInfo.version} (Build \${packageInfo.buildNumber})'",
+      ),
+    );
+    expect(source, contains('Icons.info_outline_rounded'));
+  });
+
+  test('appearance settings control theme, font family, size, and weight', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    expect(source, contains("'Appearance'"));
+    expect(source, contains("'Application font'"));
+    expect(source, contains("'Font weight'"));
+    expect(source, contains("'Font size'"));
+    expect(source, contains('appFontFamilies'));
+    expect(source, contains("'Sans Serif': 'sans-serif'"));
+    expect(source, contains("'Inter': 'Inter'"));
+    expect(source, contains("'Noto Sans': 'Noto Sans'"));
+    expect(source, contains("'Roboto Condensed': 'Roboto Condensed'"));
+    expect(source, contains('appFontWeights'));
+    expect(source, contains('appFontScales'));
+    expect(source, contains("'appearance_theme_mode'"));
+    expect(source, contains("'appearance_font_family'"));
+    expect(source, contains("'appearance_font_weight'"));
+    expect(source, contains("'appearance_font_scale'"));
+    expect(source, contains('systemScale * _fontScale'));
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    expect(pubspec, contains('family: Inter'));
+    expect(pubspec, contains('family: Poppins'));
+    expect(pubspec, contains('assets/fonts/licenses/'));
+    expect(source, isNot(contains('HeaderAction.theme')));
+  });
+
+  test('open reader can rename its current PDF', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    expect(source, contains('ReaderTool.rename'));
+    expect(source, contains('Future<void> _renameOpenDocument()'));
+    expect(source, contains('required this.onRename'));
+    expect(
+      source,
+      contains('final renamed = await widget.onRename(_document)'),
+    );
+    expect(source, contains("case 'rename':"));
   });
 
   test('reader enables text selection and open-file deletion', () {
@@ -40,6 +136,12 @@ void main() {
     final source = File('lib/main.dart').readAsStringSync();
     expect(source, contains('PdfViewerGeneralTapType.doubleTap'));
     expect(source, contains('_toggleDoubleTapZoom(details.documentPosition)'));
+    expect(source, contains('calcMatrixForFit(pageNumber: _page)'));
+    expect(source, contains('if (_doubleTapZoomedIn)'));
+    expect(source, contains('await _controller.goTo(fitMatrix)'));
+    expect(source, contains('currentZoom * 2'));
+    expect(source, isNot(contains('final minimumZoom = _controller.minScale')));
+    expect(source, isNot(contains('final fitTolerance =')));
     expect(source, contains('details.type != PdfViewerGeneralTapType.tap'));
   });
 
