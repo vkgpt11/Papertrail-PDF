@@ -8,7 +8,8 @@ $projectDirectory = $PSScriptRoot
 Set-Location -LiteralPath $projectDirectory
 
 $defaultJavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.15.6-hotspot"
-if (-not $env:JAVA_HOME -and (Test-Path -LiteralPath $defaultJavaHome)) {
+if ((-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath $env:JAVA_HOME)) -and
+    (Test-Path -LiteralPath $defaultJavaHome)) {
     $env:JAVA_HOME = $defaultJavaHome
 }
 
@@ -35,6 +36,8 @@ if ($Format -in @("apk", "both")) {
     $apkDestination = Join-Path $releaseDirectory $apkName
     Copy-Item -LiteralPath "build\app\outputs\flutter-apk\app-release.apk" -Destination $apkDestination -Force
     Write-Host "APK created: $apkDestination" -ForegroundColor Green
+    $apkHash = (Get-FileHash -LiteralPath $apkDestination -Algorithm SHA256).Hash
+    Write-Host "SHA-256: $apkHash" -ForegroundColor Cyan
 }
 
 if ($Format -in @("aab", "both")) {
@@ -44,4 +47,6 @@ if ($Format -in @("aab", "both")) {
     $aabDestination = Join-Path $releaseDirectory $aabName
     Copy-Item -LiteralPath "build\app\outputs\bundle\release\app-release.aab" -Destination $aabDestination -Force
     Write-Host "App Bundle created: $aabDestination" -ForegroundColor Green
+    $aabHash = (Get-FileHash -LiteralPath $aabDestination -Algorithm SHA256).Hash
+    Write-Host "SHA-256: $aabHash" -ForegroundColor Cyan
 }

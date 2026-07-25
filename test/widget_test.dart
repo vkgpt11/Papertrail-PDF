@@ -39,7 +39,7 @@ void main() {
       await prepareApp(tester, entry.value);
       expect(find.text('Papertrail'), findsOneWidget);
       expect(find.byTooltip('Sort PDFs'), findsOneWidget);
-      expect(find.byTooltip('Change theme'), findsOneWidget);
+      expect(find.byTooltip('Change theme'), findsNothing);
       expect(find.byTooltip('Search filters'), findsNothing);
       expect(find.byTooltip('Create library folder'), findsNothing);
       expect(tester.takeException(), isNull);
@@ -48,17 +48,25 @@ void main() {
     });
   }
 
-  testWidgets('theme control changes app brightness', (tester) async {
+  testWidgets('appearance controls expose theme, font, size, and weight', (
+    tester,
+  ) async {
     await prepareApp(tester, const Size(390, 844));
-    final before = tester
-        .widget<MaterialApp>(find.byType(MaterialApp))
-        .themeMode;
-    await tester.tap(find.byTooltip('Change theme'));
-    await tester.pump(const Duration(milliseconds: 100));
-    final after = tester
-        .widget<MaterialApp>(find.byType(MaterialApp))
-        .themeMode;
-    expect(after, isNot(before));
+    tester.state<ScaffoldState>(find.byType(Scaffold)).openDrawer();
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Theme'), findsOneWidget);
+    expect(find.text('Application font'), findsOneWidget);
+    expect(find.text('Font weight'), findsOneWidget);
+    expect(find.text('Font size'), findsOneWidget);
+    expect(
+      tester
+          .widget<DropdownButtonFormField<ThemeMode>>(
+            find.byType(DropdownButtonFormField<ThemeMode>),
+          )
+          .initialValue,
+      ThemeMode.system,
+    );
   });
 
   testWidgets('bottom page controls are configurable and default off', (
@@ -92,6 +100,16 @@ void main() {
       matching: find.byType(Switch),
     );
     expect(tester.widget<Switch>(messageSwitch).value, isTrue);
+    final drawerScrollable = find.descendant(
+      of: find.byType(Drawer),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.text('Header options'),
+      300,
+      scrollable: drawerScrollable,
+    );
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('Header options'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -109,10 +127,6 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Search document'), findsNothing);
-    final drawerScrollable = find.descendant(
-      of: find.byType(Drawer),
-      matching: find.byType(Scrollable),
-    );
     await tester.scrollUntilVisible(
       find.text('Reader options'),
       300,
