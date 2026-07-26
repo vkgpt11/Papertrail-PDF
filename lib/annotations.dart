@@ -102,6 +102,7 @@ class AnnotationLayerState extends State<AnnotationLayer> {
   late final Future<void> _loadFuture;
   Future<void>? _saveInProgress;
   bool _loaded = false;
+  bool _dirty = false;
   int _revision = 0;
 
   String get _sidecarPath => '${widget.pdfPath}.papertrail-annotations.json';
@@ -159,7 +160,10 @@ class AnnotationLayerState extends State<AnnotationLayer> {
     _saveInProgress = save;
     try {
       await save;
-      if (revision == _revision) widget.onDirtyChanged(false);
+      if (revision == _revision) {
+        if (mounted) setState(() => _dirty = false);
+        widget.onDirtyChanged(false);
+      }
       if (mounted) {
         PapertrailNotice.show(
           context,
@@ -197,6 +201,7 @@ class AnnotationLayerState extends State<AnnotationLayer> {
 
   void _changed() {
     _revision++;
+    _dirty = true;
     _notifyPages();
     widget.onDirtyChanged(true);
   }
@@ -573,7 +578,9 @@ class AnnotationLayerState extends State<AnnotationLayer> {
                   children: [
                     for (final tool in AnnotationTool.values)
                       IconButton(
-                        tooltip: tool == AnnotationTool.signature
+                        tooltip: !_loaded
+                            ? 'Annotation tools are loading'
+                            : tool == AnnotationTool.signature
                             ? 'Add signature'
                             : tool.name,
                         isSelected: _tool == tool,
@@ -590,21 +597,30 @@ class AnnotationLayerState extends State<AnnotationLayer> {
                       ),
                     const VerticalDivider(),
                     IconButton(
-                      tooltip: 'Undo',
+                      tooltip: _marks.isEmpty ? 'Nothing to undo' : 'Undo',
                       onPressed: _marks.isEmpty ? null : _undo,
                       icon: const Icon(Icons.undo),
                     ),
                     IconButton(
-                      tooltip: 'Redo',
+                      tooltip: _redo.isEmpty ? 'Nothing to redo' : 'Redo',
                       onPressed: _redo.isEmpty ? null : _redoLast,
                       icon: const Icon(Icons.redo),
                     ),
                     IconButton(
-                      tooltip: 'Save annotations',
-                      onPressed: _loaded && _saveInProgress == null
+                      tooltip: !_dirty
+                          ? 'No annotation changes to save'
+                          : _saveInProgress != null
+                          ? 'Saving annotation changes'
+                          : 'Save annotation changes',
+                      onPressed: _loaded && _dirty && _saveInProgress == null
                           ? _save
                           : null,
-                      icon: const Icon(Icons.save_outlined),
+                      icon: _saveInProgress == null
+                          ? const Icon(Icons.save_outlined)
+                          : const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                     ),
                   ],
                 ),

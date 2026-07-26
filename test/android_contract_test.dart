@@ -316,7 +316,8 @@ void main() {
     expect(source, contains("'Opening PDF…'"));
     expect(source, contains('PageRouteBuilder<int>'));
     expect(source, contains('loadingBannerBuilder:'));
-    expect(source, contains('const _PdfLoadingView()'));
+    expect(source, contains('_PdfLoadingView(fileName: _document.name)'));
+    expect(source, contains("label: 'Preparing \$fileName'"));
   });
 
   test('primary action opens PDFs without routine import banners', () {
@@ -396,6 +397,7 @@ void main() {
 
   test('options use icons and expose active selections', () {
     final source = File('lib/main.dart').readAsStringSync();
+    final annotations = File('lib/annotations.dart').readAsStringSync();
     expect(source, contains('IconData librarySortIcon'));
     expect(source, contains('IconData readerToolIcon'));
     expect(source, contains('IconData headerActionIcon'));
@@ -403,6 +405,15 @@ void main() {
     expect(source, contains('selected: value'));
     expect(source, contains('_isReaderToolSelected'));
     expect(source, contains('Icons.check_circle_rounded'));
+    expect(source, contains('Size.square(48)'));
+    expect(source, contains('WidgetState.selected'));
+    expect(source, contains("'Document actions'"));
+    expect(source, contains("'Remove from Papertrail'"));
+    expect(source, contains("'Loading your PDF library…'"));
+    expect(source, contains("'Preparing \${_document.name} for sharing…'"));
+    expect(annotations, contains("'Nothing to undo'"));
+    expect(annotations, contains("'No annotation changes to save'"));
+    expect(annotations, contains('bool _dirty = false'));
   });
 
   test('annotations are page-owned and saves are protected', () {
@@ -454,7 +465,7 @@ void main() {
     expect(summary, contains('_saveCached'));
   });
 
-  test('horizontal sections indicate hidden content', () {
+  test('horizontal sections provide functional navigation buttons', () {
     final source = File('lib/main.dart').readAsStringSync();
     final annotations = File('lib/annotations.dart').readAsStringSync();
     final cues = File('lib/horizontal_scroll_cue.dart').readAsStringSync();
@@ -463,7 +474,11 @@ void main() {
       greaterThanOrEqualTo(2),
     );
     expect(annotations, contains('HorizontalScrollCue'));
-    expect(cues, contains('More items to the right'));
+    expect(cues, contains('Show previous items'));
+    expect(cues, contains('Show more items'));
+    expect(cues, contains('_controller.animateTo'));
+    expect(cues, contains('onPressed: onPressed'));
+    expect(cues, contains('TextDirection.rtl'));
     expect(cues, contains('Icons.chevron_right_rounded'));
   });
 }
