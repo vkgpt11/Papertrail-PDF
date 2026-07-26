@@ -34,7 +34,6 @@ class AnnotationExporter {
       );
       validatePageCount(source.pages.length);
       final output = pw.Document();
-      var exportedPages = 0;
       var totalPixels = 0;
       for (final page in source.pages) {
         final pageMarks = marks
@@ -90,16 +89,12 @@ class AnnotationExporter {
               ),
             ),
           );
-          exportedPages++;
         } finally {
           flattened?.dispose();
           base?.dispose();
           rendered.dispose();
         }
         await Future<void>.delayed(Duration.zero);
-      }
-      if (exportedPages != source.pages.length) {
-        throw StateError('The annotated export is incomplete.');
       }
       final directory = _temporaryDirectory ?? await getTemporaryDirectory();
       final file = File(

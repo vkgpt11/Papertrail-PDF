@@ -171,6 +171,14 @@ int? validPageTarget(String value, int pageCount) {
   return page;
 }
 
+String comparableFilePath(String path) {
+  final candidate = Platform.isWindows ? path.replaceAll('/', r'\') : path;
+  final absolute = File(
+    candidate,
+  ).absolute.uri.normalizePath().toFilePath(windows: Platform.isWindows);
+  return Platform.isWindows ? absolute.replaceAll('/', r'\') : absolute;
+}
+
 Future<void> deleteDocumentArtifacts(
   String pdfPath, {
   String? fingerprint,
@@ -697,8 +705,8 @@ class DocumentStore {
     final parent = source.parent.path;
     var target = File('$parent$separator$safeName');
     final sameIgnoringCase =
-        _comparablePath(target.path).toLowerCase() ==
-        _comparablePath(source.path).toLowerCase();
+        comparableFilePath(target.path).toLowerCase() ==
+        comparableFilePath(source.path).toLowerCase();
     if (!sameIgnoringCase && await target.exists()) {
       final base = safeName.substring(0, safeName.length - 4);
       target = File(
@@ -736,16 +744,11 @@ class DocumentStore {
     return document.copyWith(name: safeName, path: target.path);
   }
 
-  String _comparablePath(String path) {
-    final absolute = File(path).absolute.path;
-    return Platform.isWindows ? absolute.replaceAll('/', r'\') : absolute;
-  }
-
   Future<void> _renameFile(File source, File target) async {
     final caseOnly =
-        _comparablePath(source.path) != _comparablePath(target.path) &&
-        _comparablePath(source.path).toLowerCase() ==
-            _comparablePath(target.path).toLowerCase();
+        comparableFilePath(source.path) != comparableFilePath(target.path) &&
+        comparableFilePath(source.path).toLowerCase() ==
+            comparableFilePath(target.path).toLowerCase();
     if (!caseOnly || !Platform.isWindows) {
       await _performRename(source, target);
       return;

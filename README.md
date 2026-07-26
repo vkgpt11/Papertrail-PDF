@@ -8,7 +8,7 @@
   [![Flutter](https://img.shields.io/badge/Flutter-3.32%2B-02569B?logo=flutter)](https://flutter.dev)
   [![Android](https://img.shields.io/badge/Android-supported-3DDC84?logo=android&logoColor=white)](#platform-status)
   [![iOS](https://img.shields.io/badge/iOS-source%20available-000000?logo=apple)](#platform-status)
-  [![Tests](https://img.shields.io/badge/tests-77%20passing-brightgreen)](#testing)
+  [![Tests](https://img.shields.io/badge/tests-79%20passing-brightgreen)](#testing)
   [![Privacy](https://img.shields.io/badge/privacy-offline--first-6558D3)](store/PRIVACY_POLICY.md)
 </div>
 

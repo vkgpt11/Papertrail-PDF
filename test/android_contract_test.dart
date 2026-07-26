@@ -59,6 +59,7 @@ void main() {
     expect(source, contains('fingerprint: document.fingerprint'));
     expect(source, contains('Override system brightness'));
     expect(source, contains('prefs.remove(\'brightness_reader\')'));
+    expect(source, contains('_brightnessOverride = true'));
     expect(source, contains('PdfSummaryService.clearCache()'));
     expect(source, contains('Keep loading valid entries'));
     expect(source, contains('known.remove(fingerprint)'));
@@ -75,7 +76,8 @@ void main() {
 
     expect(exporter, contains('could not be rendered for export'));
     expect(exporter, contains('could not be encoded for export'));
-    expect(exporter, contains('exportedPages != source.pages.length'));
+    expect(exporter, contains('requireRenderedAnnotationPage'));
+    expect(exporter, contains('requireEncodedAnnotationPage'));
     expect(exporter, contains('maximumTotalPixels'));
     expect(source, contains('Saved annotations are damaged'));
     expect(signatures, contains('AesGcm.with256bits()'));

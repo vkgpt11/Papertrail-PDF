@@ -100,6 +100,38 @@ void main() {
     expect(File(renamed.path).path, endsWith('Report.pdf'));
   });
 
+  test('comparable paths normalize relative segments', () {
+    final base = Directory.current.path;
+    final first = comparableFilePath(
+      '$base${Platform.pathSeparator}folder${Platform.pathSeparator}..'
+      '${Platform.pathSeparator}report.pdf',
+    );
+    final second = comparableFilePath(
+      '$base${Platform.pathSeparator}report.pdf',
+    );
+
+    expect(
+      Platform.isWindows ? first.toLowerCase() : first,
+      Platform.isWindows ? second.toLowerCase() : second,
+    );
+  });
+
+  test(
+    'Windows comparable paths normalize separators, drive case, and UNC paths',
+    () {
+      if (!Platform.isWindows) return;
+
+      expect(
+        comparableFilePath(r'C:\Temp\Folder\..\Report.pdf').toLowerCase(),
+        comparableFilePath(r'c:/temp/report.pdf').toLowerCase(),
+      );
+      expect(
+        comparableFilePath(r'\\server\share\Folder\Report.pdf').toLowerCase(),
+        comparableFilePath('//SERVER/share/Folder/Report.pdf').toLowerCase(),
+      );
+    },
+  );
+
   test('rename reports the sanitized on-disk name', () async {
     final directory = await Directory.systemTemp.createTemp(
       'papertrail-safe-rename-',
