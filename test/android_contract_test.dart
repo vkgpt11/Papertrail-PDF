@@ -28,6 +28,52 @@ void main() {
     expect(workflow, contains('retention-days: 30'));
   });
 
+  test('installation, launch, and in-app branding share one logo', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final adaptiveIcon = File(
+      'android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+    ).readAsStringSync();
+    final androidLaunch = File(
+      'android/app/src/main/res/drawable/launch_background.xml',
+    ).readAsStringSync();
+    final android31Launch = File(
+      'android/app/src/main/res/values-v31/styles.xml',
+    ).readAsStringSync();
+    final iosLaunch = File(
+      'ios/Runner/Base.lproj/LaunchScreen.storyboard',
+    ).readAsStringSync();
+    final masterIcon = File(
+      'assets/branding/papertrail-icon-1024.png',
+    ).readAsBytesSync();
+
+    expect(source, contains("'assets/branding/papertrail-icon-1024.png'"));
+    expect(source, isNot(contains('_PapertrailLogoPainter')));
+    expect(pubspec, contains('- assets/branding/papertrail-icon-1024.png'));
+    expect(manifest, contains('android:roundIcon="@mipmap/ic_launcher_round"'));
+    expect(adaptiveIcon, contains('@color/papertrail_brand'));
+    expect(adaptiveIcon, contains('@drawable/ic_launcher_foreground'));
+    expect(androidLaunch, contains('@mipmap/ic_launcher'));
+    expect(android31Launch, contains('windowSplashScreenAnimatedIcon'));
+    expect(iosLaunch, contains('contentMode="scaleAspectFit"'));
+
+    for (final launchIcon in [
+      'LaunchImage.png',
+      'LaunchImage@2x.png',
+      'LaunchImage@3x.png',
+    ]) {
+      expect(
+        File(
+          'ios/Runner/Assets.xcassets/LaunchImage.imageset/$launchIcon',
+        ).readAsBytesSync(),
+        orderedEquals(masterIcon),
+      );
+    }
+  });
+
   test('iOS declares PDF document support', () {
     final plist = File('ios/Runner/Info.plist').readAsStringSync();
     expect(plist, contains('CFBundleDocumentTypes'));
