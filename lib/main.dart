@@ -541,11 +541,26 @@ class RecentDocument {
   );
 }
 
+class FileRenameRecoveryException implements Exception {
+  const FileRenameRecoveryException(this.actualFile, this.message);
+
+  final File actualFile;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class DocumentRenameException implements Exception {
-  const DocumentRenameException(this.actualDocument, this.cause);
+  const DocumentRenameException(
+    this.actualDocument,
+    this.cause, {
+    this.annotationSidecarPath,
+  });
 
   final RecentDocument actualDocument;
   final Object cause;
+  final String? annotationSidecarPath;
 
   @override
   String toString() => 'Rename rollback failed: $cause';
@@ -554,12 +569,15 @@ class DocumentRenameException implements Exception {
 class DocumentStore {
   DocumentStore({
     Future<void> Function(File source, File target)? renameOperation,
-  }) : _renameOperation = renameOperation;
+    Future<void> Function(File source, File target)? copyOperation,
+  }) : _renameOperation = renameOperation,
+       _copyOperation = copyOperation;
 
   static const _key = 'recent_documents_v1';
   static const _foldersKey = 'library_folders_v1';
   static const _secureStorage = FlutterSecureStorage();
   final Future<void> Function(File source, File target)? _renameOperation;
+  final Future<void> Function(File source, File target)? _copyOperation;
 
   Future<void> _saveRaw(String raw) async {
     final prefs = await SharedPreferences.getInstance();
@@ -714,7 +732,14 @@ class DocumentStore {
       );
     }
     if (target.path != source.path) {
-      await _renameFile(source, target);
+      try {
+        await _renameFile(source, target);
+      } on FileRenameRecoveryException catch (error) {
+        throw DocumentRenameException(
+          document.copyWith(name: safeName, path: error.actualFile.path),
+          error,
+        );
+      }
       final sourceAnnotations = File(
         '${source.path}.papertrail-annotations.json',
       );
@@ -728,13 +753,26 @@ class DocumentStore {
           try {
             await _renameFile(target, source);
           } catch (rollbackError) {
+            Object? copyError;
+            try {
+              await _performCopy(target, source);
+              await target.delete();
+            } catch (error) {
+              copyError = error;
+            }
+            if (copyError == null) {
+              Error.throwWithStackTrace(annotationError, annotationStack);
+            }
             final actual = await target.exists() ? target : source;
             throw DocumentRenameException(
               document.copyWith(
                 name: actual.path == target.path ? safeName : document.name,
                 path: actual.path,
               ),
-              rollbackError,
+              '$rollbackError; copy recovery failed: $copyError',
+              annotationSidecarPath: await sourceAnnotations.exists()
+                  ? sourceAnnotations.path
+                  : null,
             );
           }
           Error.throwWithStackTrace(annotationError, annotationStack);
@@ -763,10 +801,16 @@ class DocumentStore {
       try {
         await _performRename(temporary, source);
       } catch (rollbackError) {
-        throw FileSystemException(
-          'Case-only rename and rollback both failed: $rollbackError',
-          temporary.path,
-        );
+        try {
+          await _performCopy(temporary, source);
+          await temporary.delete();
+        } catch (copyError) {
+          throw FileRenameRecoveryException(
+            temporary,
+            'Case-only rename, rollback, and copy recovery failed: '
+            '$rollbackError; $copyError',
+          );
+        }
       }
       Error.throwWithStackTrace(renameError, renameStack);
     }
@@ -778,6 +822,15 @@ class DocumentStore {
       await operation(source, target);
     } else {
       await source.rename(target.path);
+    }
+  }
+
+  Future<void> _performCopy(File source, File target) async {
+    final operation = _copyOperation;
+    if (operation != null) {
+      await operation(source, target);
+    } else {
+      await source.copy(target.path);
     }
   }
 
@@ -3642,6 +3695,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _renameOpenDocument() async {
+    try {
+      await _annotationKey.currentState?.waitForPendingSave();
+    } catch (_) {
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'Wait for the current annotation save before renaming this PDF.',
+          isError: true,
+        );
+      }
+      return;
+    }
     if (_annotationsDirty) {
       try {
         await _annotationKey.currentState?.save();

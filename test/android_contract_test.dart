@@ -52,6 +52,8 @@ void main() {
     expect(source, contains('Future<void> _saveRaw(String raw)'));
     expect(source, contains('await prefs.setString(_key, raw)'));
     expect(source, contains('await _renameFile(source, target)'));
+    expect(source, contains('await _performCopy(target, source)'));
+    expect(source, contains('annotationSidecarPath'));
     expect(source, contains('late final Future<void> _initialization'));
     expect(source, contains('await _initialization'));
     expect(source, contains('setMethodCallHandler(null)'));
@@ -414,6 +416,7 @@ void main() {
     expect(annotations, contains('mark.page == page'));
     expect(annotations, contains('_writeAtomically'));
     expect(annotations, contains('while (_saveInProgress != null)'));
+    expect(annotations, contains('Future<void> waitForPendingSave()'));
   });
 
   test('search indexing is cached, serialized, and path-consistent', () {

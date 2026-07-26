@@ -210,6 +210,9 @@ void main() {
         }
         await from.rename(to.path);
       },
+      copyOperation: (_, __) async {
+        throw const FileSystemException('Injected copy recovery failure');
+      },
     );
 
     DocumentRenameException? failure;
@@ -221,8 +224,85 @@ void main() {
 
     expect(failure, isNotNull);
     expect(failure!.actualDocument.path, endsWith('new.pdf'));
+    expect(
+      failure.annotationSidecarPath,
+      endsWith('old.pdf.papertrail-annotations.json'),
+    );
     expect(await File(failure.actualDocument.path).exists(), isTrue);
     expect(await source.exists(), isFalse);
+  });
+
+  test('failed rollback falls back to copying the PDF home', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-copy-recovery-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/old.pdf');
+    final annotations = File('${source.path}.papertrail-annotations.json');
+    await source.writeAsBytes([1, 2, 3]);
+    await annotations.writeAsString('[]');
+    final document = RecentDocument(
+      name: 'old.pdf',
+      path: source.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2026),
+    );
+    final store = DocumentStore(
+      renameOperation: (from, to) async {
+        if (from.path.endsWith('.papertrail-annotations.json') ||
+            (from.path.endsWith('new.pdf') && to.path.endsWith('old.pdf'))) {
+          throw const FileSystemException('Injected rename failure');
+        }
+        await from.rename(to.path);
+      },
+    );
+
+    await expectLater(
+      store.rename(document, 'new'),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(await source.readAsBytes(), [1, 2, 3]);
+    expect(await File('${directory.path}/new.pdf').exists(), isFalse);
+    expect(await annotations.exists(), isTrue);
+  });
+
+  test('case-only double failure does not orphan the temporary PDF', () async {
+    if (!Platform.isWindows) return;
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-case-copy-recovery-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/report.pdf');
+    await source.writeAsBytes([1, 2, 3]);
+    final document = RecentDocument(
+      name: 'report.pdf',
+      path: source.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2026),
+    );
+    final store = DocumentStore(
+      renameOperation: (from, to) async {
+        if (from.path.contains('.rename')) {
+          throw const FileSystemException('Injected case rename failure');
+        }
+        await from.rename(to.path);
+      },
+    );
+
+    await expectLater(
+      store.rename(document, 'Report'),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(await source.readAsBytes(), [1, 2, 3]);
+    expect(
+      await directory
+          .list()
+          .where((entity) => entity.path.contains('.rename'))
+          .isEmpty,
+      isTrue,
+    );
   });
 
   test('single-file deletion removes the PDF and annotation sidecar', () async {
