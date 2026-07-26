@@ -65,90 +65,17 @@ class PapertrailLogo extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
     image: true,
     label: 'Papertrail PDF logo',
-    child: SizedBox.square(
-      dimension: size,
-      child: CustomPaint(
-        painter: _PapertrailLogoPainter(
-          color: Theme.of(context).colorScheme.primary,
-        ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(size * .22),
+      child: Image.asset(
+        'assets/branding/papertrail-icon-1024.png',
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
       ),
     ),
   );
-}
-
-class _PapertrailLogoPainter extends CustomPainter {
-  const _PapertrailLogoPainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final scale = size.shortestSide / 40;
-    final outline = Paint()
-      ..color = color.withValues(alpha: .42)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2 * scale
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(3 * scale, 10 * scale, 26 * scale, 27 * scale),
-        Radius.circular(4 * scale),
-      ),
-      outline,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(7 * scale, 6 * scale, 26 * scale, 27 * scale),
-        Radius.circular(4 * scale),
-      ),
-      outline,
-    );
-
-    final page = Path()
-      ..moveTo(12 * scale, 2 * scale)
-      ..lineTo(30 * scale, 2 * scale)
-      ..lineTo(38 * scale, 10 * scale)
-      ..lineTo(38 * scale, 30 * scale)
-      ..quadraticBezierTo(38 * scale, 34 * scale, 34 * scale, 34 * scale)
-      ..lineTo(12 * scale, 34 * scale)
-      ..quadraticBezierTo(8 * scale, 34 * scale, 8 * scale, 30 * scale)
-      ..lineTo(8 * scale, 6 * scale)
-      ..quadraticBezierTo(8 * scale, 2 * scale, 12 * scale, 2 * scale)
-      ..close();
-    canvas.drawPath(page, Paint()..color = color);
-
-    final fold = Path()
-      ..moveTo(30 * scale, 2 * scale)
-      ..lineTo(30 * scale, 10 * scale)
-      ..lineTo(38 * scale, 10 * scale)
-      ..close();
-    canvas.drawPath(fold, Paint()..color = Colors.white.withValues(alpha: .65));
-
-    final line = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 2.2 * scale
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      Offset(14 * scale, 16 * scale),
-      Offset(31 * scale, 16 * scale),
-      line,
-    );
-    canvas.drawLine(
-      Offset(14 * scale, 22 * scale),
-      Offset(31 * scale, 22 * scale),
-      line,
-    );
-    canvas.drawLine(
-      Offset(14 * scale, 28 * scale),
-      Offset(25 * scale, 28 * scale),
-      line,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _PapertrailLogoPainter oldDelegate) =>
-      oldDelegate.color != color;
 }
 
 class _OpeningPdfOverlay extends StatelessWidget {
