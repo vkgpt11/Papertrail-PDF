@@ -186,6 +186,23 @@ The same script can create a Google Play App Bundle or both release formats:
 .\build-release.ps1 -Format both
 ```
 
+### Automatic build after merging
+
+Every push to `main`, including a merged pull request, runs the
+**Android build after merge** GitHub Actions workflow. The workflow analyzes and
+tests the application, creates a versioned APK such as
+`Papertrail-PDF-v1.5.3-build28.apk`, generates its SHA-256 checksum, and keeps
+both files as a downloadable workflow artifact for 30 days.
+
+Open the repository's **Actions** tab, select the completed workflow run, and
+download the artifact from its **Artifacts** section. The workflow can also be
+started manually with **Run workflow**.
+
+> [!NOTE]
+> Automated APKs use the repository's current local-testing signing
+> configuration. Configure protected GitHub secrets and a private upload
+> keystore before using automation to produce Google Play release artifacts.
+
 To build manually without the versioned filename:
 
 ```sh
