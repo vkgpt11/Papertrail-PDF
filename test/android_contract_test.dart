@@ -14,6 +14,20 @@ void main() {
     expect(manifest, contains('android.permission.CAMERA'));
   });
 
+  test('main branch produces a downloadable versioned Android build', () {
+    final workflow = File(
+      '.github/workflows/android-build-after-merge.yml',
+    ).readAsStringSync();
+    expect(workflow, contains('branches:'));
+    expect(workflow, contains('- main'));
+    expect(workflow, contains('flutter analyze'));
+    expect(workflow, contains('flutter test'));
+    expect(workflow, contains('flutter build apk --release'));
+    expect(workflow, contains('Papertrail-PDF-v\${VERSION_NAME}'));
+    expect(workflow, contains('actions/upload-artifact@v4'));
+    expect(workflow, contains('retention-days: 30'));
+  });
+
   test('iOS declares PDF document support', () {
     final plist = File('ios/Runner/Info.plist').readAsStringSync();
     expect(plist, contains('CFBundleDocumentTypes'));
