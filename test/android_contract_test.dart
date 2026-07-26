@@ -45,6 +45,9 @@ void main() {
     ).readAsStringSync();
     final exporter = File('lib/annotation_export.dart').readAsStringSync();
     final summary = File('lib/pdf_summary.dart').readAsStringSync();
+    final signatures = File('lib/signatures.dart').readAsStringSync();
+    final ios = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    final iosPlist = File('ios/Runner/Info.plist').readAsStringSync();
 
     expect(source, contains('Future<void> _saveRaw(String raw)'));
     expect(source, contains('await prefs.setString(_key, raw)'));
@@ -57,6 +60,12 @@ void main() {
     expect(source, contains('Override system brightness'));
     expect(source, contains('prefs.remove(\'brightness_reader\')'));
     expect(source, contains('PdfSummaryService.clearCache()'));
+    expect(source, contains('Keep loading valid entries'));
+    expect(source, contains('known.remove(fingerprint)'));
+    expect(source, contains('Papertrail could not load the library.'));
+    expect(source, contains('One locked temporary file'));
+    expect(source, contains('512 * 1024'));
+    expect(source, contains('sanitizeCrashMessage'));
     expect(summary, contains('static Future<void> clearCache()'));
 
     expect(android, contains('pendingPdf = pdf'));
@@ -67,6 +76,13 @@ void main() {
     expect(exporter, contains('could not be rendered for export'));
     expect(exporter, contains('could not be encoded for export'));
     expect(exporter, contains('exportedPages != source.pages.length'));
+    expect(exporter, contains('maximumTotalPixels'));
+    expect(source, contains('Saved annotations are damaged'));
+    expect(signatures, contains('AesGcm.with256bits()'));
+    expect(signatures, contains('FlutterSecureStorage'));
+    expect(signatures, contains('.ptsig'));
+    expect(ios, contains('self?.pendingPdf = nil'));
+    expect(iosPlist, isNot(contains('UIFileSharingEnabled')));
   });
 
   test('installation, launch, and in-app branding share one logo', () {

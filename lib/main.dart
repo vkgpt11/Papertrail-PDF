@@ -208,37 +208,53 @@ void main() {
 }
 
 Future<void> _cleanupTemporaryFiles() async {
-  final now = DateTime.now();
-  for (final directory in [
-    Directory.systemTemp,
-    await getTemporaryDirectory(),
-  ]) {
-    if (!await directory.exists()) continue;
-    await for (final entity in directory.list()) {
-      if (entity is! File ||
-          (!entity.path.contains('papertrail-ocr-') &&
-              !entity.path.contains('incoming-') &&
-              !entity.path.contains('papertrail-annotated-'))) {
-        continue;
-      }
-      final modified = (await entity.stat()).modified;
-      if (now.difference(modified) > const Duration(hours: 24)) {
-        await entity.delete();
-      }
-    }
-  }
-  final summaryDirectory = Directory(
-    '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
-    'papertrail-summaries',
-  );
-  if (await summaryDirectory.exists()) {
-    await for (final entity in summaryDirectory.list()) {
-      if (entity is! File) continue;
-      final modified = (await entity.stat()).modified;
-      if (now.difference(modified) > const Duration(hours: 24)) {
-        await entity.delete();
+  try {
+    final now = DateTime.now();
+    for (final directory in [
+      Directory.systemTemp,
+      await getTemporaryDirectory(),
+    ]) {
+      try {
+        if (!await directory.exists()) continue;
+        await for (final entity in directory.list()) {
+          try {
+            if (entity is! File ||
+                (!entity.path.contains('papertrail-ocr-') &&
+                    !entity.path.contains('incoming-') &&
+                    !entity.path.contains('papertrail-annotated-'))) {
+              continue;
+            }
+            final modified = (await entity.stat()).modified;
+            if (now.difference(modified) > const Duration(hours: 24)) {
+              await entity.delete();
+            }
+          } catch (_) {
+            // One locked temporary file must not stop startup cleanup.
+          }
+        }
+      } catch (_) {
+        // Some platforms do not allow enumerating the system temp directory.
       }
     }
+    final summaryDirectory = Directory(
+      '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
+      'papertrail-summaries',
+    );
+    if (await summaryDirectory.exists()) {
+      await for (final entity in summaryDirectory.list()) {
+        try {
+          if (entity is! File) continue;
+          final modified = (await entity.stat()).modified;
+          if (now.difference(modified) > const Duration(hours: 24)) {
+            await entity.delete();
+          }
+        } catch (_) {
+          // Summary cache cleanup is best effort.
+        }
+      }
+    }
+  } catch (_) {
+    // Cleanup must never create an unhandled startup error.
   }
 }
 
@@ -248,8 +264,14 @@ Future<void> _writePrivateCrashLog(String message) async {
     final file = File(
       '${directory.path}${Platform.pathSeparator}papertrail-crash.log',
     );
+    if (await file.exists() && await file.length() > 512 * 1024) {
+      final previous = File('${file.path}.previous');
+      if (await previous.exists()) await previous.delete();
+      await file.rename(previous.path);
+    }
+    final sanitized = sanitizeCrashMessage(message);
     await file.writeAsString(
-      '${DateTime.now().toIso8601String()} $message\n',
+      '${DateTime.now().toIso8601String()} $sanitized\n',
       mode: FileMode.append,
       flush: true,
     );
@@ -257,6 +279,13 @@ Future<void> _writePrivateCrashLog(String message) async {
     // Diagnostics are local-only and must never cause another failure.
   }
 }
+
+String sanitizeCrashMessage(String message) => message
+    .replaceAll(RegExp(r'([A-Za-z]:)?[/\\][^\s]+\.pdf'), '[PDF]')
+    .replaceAll(
+      RegExp(r'password\s*[:=]\s*\S+', caseSensitive: false),
+      'password=[redacted]',
+    );
 
 class PapertrailApp extends StatefulWidget {
   const PapertrailApp({super.key});
@@ -514,34 +543,43 @@ class DocumentStore {
     raw ??= prefs.getString(_key);
     if (raw == null) return [];
     try {
-      final stored = (jsonDecode(raw) as List).map(
-        (item) => RecentDocument.fromJson(item as Map<String, dynamic>),
-      );
+      final stored = jsonDecode(raw) as List;
       final fingerprints = <String>{};
       final unique = <RecentDocument>[];
       var changed = false;
-      for (final document in stored) {
-        final file = File(document.path);
-        if (!await file.exists()) {
+      for (final item in stored) {
+        try {
+          final document = RecentDocument.fromJson(
+            item as Map<String, dynamic>,
+          );
+          final file = File(document.path);
+          if (!await file.exists()) {
+            changed = true;
+            continue;
+          }
+          final fingerprint = document.fingerprint ?? await _fingerprint(file);
+          if (!fingerprints.add(fingerprint)) {
+            changed = true;
+            continue;
+          }
+          var updated = document.copyWith(fingerprint: fingerprint);
+          final recoveredPage = prefs.getInt('resume_$fingerprint');
+          if (recoveredPage != null && recoveredPage > 0) {
+            updated = updated.copyWith(
+              page: recoveredPage,
+              hasBeenOpened: true,
+            );
+          }
+          if (document.fileSize <= 0 || document.pageCount <= 0) {
+            updated = await _withFileDetails(updated, file);
+            changed = true;
+          }
+          unique.add(updated);
+          changed = changed || document.fingerprint == null;
+        } catch (_) {
+          // Keep loading valid entries when one PDF or metadata record is bad.
           changed = true;
-          continue;
         }
-        final fingerprint = document.fingerprint ?? await _fingerprint(file);
-        if (!fingerprints.add(fingerprint)) {
-          changed = true;
-          continue;
-        }
-        var updated = document.copyWith(fingerprint: fingerprint);
-        final recoveredPage = prefs.getInt('resume_$fingerprint');
-        if (recoveredPage != null && recoveredPage > 0) {
-          updated = updated.copyWith(page: recoveredPage, hasBeenOpened: true);
-        }
-        if (document.fileSize <= 0 || document.pageCount <= 0) {
-          updated = await _withFileDetails(updated, file);
-          changed = true;
-        }
-        unique.add(updated);
-        changed = changed || document.fingerprint == null;
       }
       if (changed) {
         await _saveRaw(
@@ -707,8 +745,9 @@ class DocumentStore {
         continue;
       }
       File? target;
+      String? fingerprint;
       try {
-        final fingerprint = await _fingerprint(entity);
+        fingerprint = await _fingerprint(entity);
         final documentDate = await _documentDate(entity);
         if (!known.add(fingerprint)) {
           skipped++;
@@ -735,6 +774,7 @@ class DocumentStore {
           ),
         );
       } catch (_) {
+        if (fingerprint != null) known.remove(fingerprint);
         failed++;
         if (target != null && await target.exists()) {
           await target.delete();
@@ -1039,6 +1079,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _importantHighlightsEnabled = false;
   String _libraryQuery = '';
   bool _loading = true;
+  String? _loadError;
   bool _scanning = false;
   bool _scanningDocument = false;
   String _appVersion = '';
@@ -1069,6 +1110,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _load() async {
+    try {
+      await _loadData();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadError = 'Papertrail could not load the library.';
+        });
+      }
+      try {
+        final initial = await _openPdfChannel.invokeMapMethod<Object?, Object?>(
+          'getInitialPdf',
+        );
+        if (initial != null && mounted) await _handleExternalPdf(initial);
+      } catch (_) {
+        // The library remains usable and offers an explicit retry.
+      }
+    }
+  }
+
+  Future<void> _loadData() async {
     final results = await Future.wait([
       _store.load(),
       _store.loadFolders(),
@@ -1079,6 +1141,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final packageInfo = results[2] as PackageInfo;
     if (mounted) {
       setState(() {
+        _loadError = null;
         _documents = documents;
         _folders = folders;
         _appVersion =
@@ -2778,6 +2841,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
           : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 48),
+                    const SizedBox(height: 16),
+                    Text(_loadError!, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _loading = true;
+                          _loadError = null;
+                        });
+                        unawaited(_load());
+                      },
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : _documents.isEmpty
           ? Center(
               child: Padding(
@@ -3429,11 +3518,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
         name: _document.name,
         onLayout: (_) async => bytes,
       );
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         PapertrailNotice.show(
           context,
-          'This PDF could not be printed.',
+          error is AnnotationExportTooLarge
+              ? error.message
+              : error is FormatException
+              ? 'Saved annotations are damaged and could not be printed.'
+              : 'This PDF could not be printed.',
           isError: true,
         );
       }
@@ -3450,11 +3543,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
       await SharePlus.instance.share(
         ShareParams(files: [XFile(exported.path)], text: _document.name),
       );
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         PapertrailNotice.show(
           context,
-          'This PDF could not be shared.',
+          error is AnnotationExportTooLarge
+              ? error.message
+              : error is FormatException
+              ? 'Saved annotations are damaged and could not be shared.'
+              : 'This PDF could not be shared.',
           icon: Icons.share_outlined,
           isError: true,
         );

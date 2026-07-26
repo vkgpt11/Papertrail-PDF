@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_reader/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test('document metadata survives persistence round trip', () {
@@ -132,4 +134,45 @@ void main() {
     expect(await pdf.exists(), isFalse);
     expect(await sidecar.exists(), isFalse);
   });
+
+  test('one damaged record does not hide valid library documents', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-load-recovery-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final pdf = File('${directory.path}/valid.pdf');
+    await pdf.writeAsBytes([1, 2, 3]);
+    final valid = RecentDocument(
+      name: 'valid.pdf',
+      path: pdf.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2026),
+      fileSize: 3,
+      pageCount: 1,
+      fingerprint: 'known-fingerprint',
+    );
+    SharedPreferences.setMockInitialValues({
+      'recent_documents_v1': '[{"broken":true},${valid.toJsonString()}]',
+    });
+
+    final loaded = await DocumentStore().load();
+
+    expect(loaded, hasLength(1));
+    expect(loaded.single.name, 'valid.pdf');
+  });
+
+  test('crash diagnostics redact PDF paths and passwords', () {
+    final sanitized = sanitizeCrashMessage(
+      r'Failed C:\private\tax-return.pdf password=Secret123',
+    );
+
+    expect(sanitized, isNot(contains('tax-return.pdf')));
+    expect(sanitized, isNot(contains('Secret123')));
+    expect(sanitized, contains('[PDF]'));
+    expect(sanitized, contains('[redacted]'));
+  });
+}
+
+extension on RecentDocument {
+  String toJsonString() => jsonEncode(toJson());
 }

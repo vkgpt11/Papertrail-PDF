@@ -1,12 +1,50 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum StoredSignatureKind { drawn, image }
+
+final _signatureCipher = AesGcm.with256bits();
+
+Future<Uint8List> encryptSignaturePayload(
+  List<int> bytes,
+  SecretKey key,
+) async {
+  final box = await _signatureCipher.encrypt(bytes, secretKey: key);
+  return Uint8List.fromList(
+    utf8.encode(
+      jsonEncode({
+        'v': 1,
+        'nonce': base64Encode(box.nonce),
+        'cipherText': base64Encode(box.cipherText),
+        'mac': base64Encode(box.mac.bytes),
+      }),
+    ),
+  );
+}
+
+Future<Uint8List> decryptSignaturePayload(
+  List<int> payload,
+  SecretKey key,
+) async {
+  final decoded = jsonDecode(utf8.decode(payload)) as Map<String, dynamic>;
+  if (decoded['v'] != 1) throw const FormatException('Unknown signature');
+  final box = SecretBox(
+    base64Decode(decoded['cipherText'] as String),
+    nonce: base64Decode(decoded['nonce'] as String),
+    mac: Mac(base64Decode(decoded['mac'] as String)),
+  );
+  return Uint8List.fromList(
+    await _signatureCipher.decrypt(box, secretKey: key),
+  );
+}
 
 class StoredSignature {
   const StoredSignature({
@@ -57,36 +95,51 @@ class StoredSignature {
 }
 
 class SignatureStore {
-  static const _key = 'papertrail_saved_signatures_v1';
+  static const _legacyKey = 'papertrail_saved_signatures_v1';
+  static const _secureKey = 'papertrail_saved_signatures_v2';
+  static const _encryptionKey = 'papertrail_signature_encryption_key_v1';
+  static const _storage = FlutterSecureStorage();
 
   Future<List<StoredSignature>> load() async {
     final prefs = await SharedPreferences.getInstance();
-    final values = prefs.getStringList(_key) ?? const [];
+    var values = <String>[];
+    try {
+      final secure = await _storage.read(key: _secureKey);
+      if (secure != null) values = (jsonDecode(secure) as List).cast<String>();
+    } catch (_) {
+      // The secure store can be temporarily unavailable before device unlock.
+    }
+    final legacy = prefs.getStringList(_legacyKey);
+    if (values.isEmpty && legacy != null) values = legacy;
     final signatures = <StoredSignature>[];
+    var migrated = legacy != null;
     for (final value in values) {
       try {
-        final signature = StoredSignature.fromJson(
+        var signature = StoredSignature.fromJson(
           jsonDecode(value) as Map<String, dynamic>,
         );
-        if (signature.kind == StoredSignatureKind.image &&
-            (signature.imagePath == null ||
-                !File(signature.imagePath!).existsSync())) {
-          continue;
+        if (signature.kind == StoredSignatureKind.image) {
+          final path = signature.imagePath;
+          if (path == null || !File(path).existsSync()) continue;
+          if (!await _isEncryptedFile(File(path))) {
+            signature = await _migrateImage(signature);
+            migrated = true;
+          }
         }
         signatures.add(signature);
       } catch (_) {
         // Ignore damaged entries without hiding the remaining signatures.
       }
     }
+    if (migrated) await save(signatures);
     return signatures;
   }
 
   Future<void> save(List<StoredSignature> signatures) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(
-      _key,
-      signatures.map((item) => jsonEncode(item.toJson())).toList(),
-    );
+    final values = signatures.map((item) => jsonEncode(item.toJson())).toList();
+    await _storage.write(key: _secureKey, value: jsonEncode(values));
+    await prefs.remove(_legacyKey);
   }
 
   Future<StoredSignature?> importImage() async {
@@ -109,18 +162,97 @@ class SignatureStore {
       '${Platform.pathSeparator}signatures',
     );
     await directory.create(recursive: true);
-    final extension = sourcePath.split('.').last.toLowerCase();
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final destination = File(
-      '${directory.path}${Platform.pathSeparator}$id.$extension',
+      '${directory.path}${Platform.pathSeparator}$id.ptsig',
     );
-    await source.copy(destination.path);
+    await _encryptToFile(await source.readAsBytes(), destination);
     return StoredSignature(
       id: id,
       name: pickedFile!.name,
       kind: StoredSignatureKind.image,
       imagePath: destination.path,
     );
+  }
+
+  Future<StoredSignature> _migrateImage(StoredSignature signature) async {
+    final source = File(signature.imagePath!);
+    await _replaceWithEncrypted(source, await source.readAsBytes());
+    return StoredSignature(
+      id: signature.id,
+      name: signature.name,
+      kind: signature.kind,
+      strokes: signature.strokes,
+      imagePath: source.path,
+    );
+  }
+
+  static Future<SecretKey> _secretKey() async {
+    String? encoded;
+    try {
+      encoded = await _storage.read(key: _encryptionKey);
+    } catch (_) {
+      // Do not fall back to an unencrypted key.
+    }
+    if (encoded != null) return SecretKey(base64Decode(encoded));
+    final key = await _signatureCipher.newSecretKey();
+    final bytes = await key.extractBytes();
+    await _storage.write(key: _encryptionKey, value: base64Encode(bytes));
+    return key;
+  }
+
+  static Future<void> _encryptToFile(List<int> bytes, File destination) async {
+    await destination.writeAsBytes(
+      await encryptSignaturePayload(bytes, await _secretKey()),
+      flush: true,
+    );
+  }
+
+  static Future<Uint8List> readImageBytes(String path) async {
+    final file = File(path);
+    final bytes = await file.readAsBytes();
+    if (!await _isEncryptedFile(file, bytes: bytes)) {
+      await _replaceWithEncrypted(file, bytes);
+      return bytes;
+    }
+    return decryptSignaturePayload(bytes, await _secretKey());
+  }
+
+  static Future<bool> _isEncryptedFile(File file, {List<int>? bytes}) async {
+    try {
+      final payload = bytes ?? await file.readAsBytes();
+      final decoded = jsonDecode(utf8.decode(payload)) as Map<String, dynamic>;
+      return decoded['v'] == 1 &&
+          decoded.containsKey('nonce') &&
+          decoded.containsKey('cipherText') &&
+          decoded.containsKey('mac');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<void> _replaceWithEncrypted(
+    File source,
+    List<int> bytes,
+  ) async {
+    final temporary = File(
+      '${source.path}.${DateTime.now().microsecondsSinceEpoch}.ptsig.tmp',
+    );
+    final backup = File('${temporary.path}.backup');
+    await _encryptToFile(bytes, temporary);
+    try {
+      await source.rename(backup.path);
+      await temporary.rename(source.path);
+      await backup.delete();
+    } catch (_) {
+      if (!await source.exists() && await backup.exists()) {
+        await backup.rename(source.path);
+      }
+      rethrow;
+    } finally {
+      if (await temporary.exists()) await temporary.delete();
+      if (await backup.exists() && await source.exists()) await backup.delete();
+    }
   }
 }
 
@@ -133,10 +265,13 @@ class SignaturePreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (signature.kind == StoredSignatureKind.image) {
-      return Image.file(
-        File(signature.imagePath!),
-        fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined),
+      return FutureBuilder<Uint8List>(
+        future: SignatureStore.readImageBytes(signature.imagePath!),
+        builder: (context, snapshot) => snapshot.hasData
+            ? Image.memory(snapshot.data!, fit: BoxFit.contain)
+            : snapshot.hasError
+            ? const Icon(Icons.broken_image_outlined)
+            : const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     }
     return CustomPaint(

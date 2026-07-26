@@ -8,7 +8,7 @@
   [![Flutter](https://img.shields.io/badge/Flutter-3.32%2B-02569B?logo=flutter)](https://flutter.dev)
   [![Android](https://img.shields.io/badge/Android-supported-3DDC84?logo=android&logoColor=white)](#platform-status)
   [![iOS](https://img.shields.io/badge/iOS-source%20available-000000?logo=apple)](#platform-status)
-  [![Tests](https://img.shields.io/badge/tests-58%20passing-brightgreen)](#testing)
+  [![Tests](https://img.shields.io/badge/tests-72%20passing-brightgreen)](#testing)
   [![Privacy](https://img.shields.io/badge/privacy-offline--first-6558D3)](store/PRIVACY_POLICY.md)
 </div>
 
@@ -22,7 +22,8 @@
 Papertrail is designed for people who want capable PDF reading without creating
 an account or sending their document library to a remote service. PDFs, search
 indexes, reading progress, signatures, annotations, and crash diagnostics stay
-on the device.
+on the device. Saved signature metadata and imported signature images are
+encrypted with a device-protected key.
 
 ## 🚀 Highlights
 

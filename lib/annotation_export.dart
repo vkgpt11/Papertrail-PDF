@@ -12,10 +12,15 @@ import 'annotations.dart';
 import 'signatures.dart';
 
 class AnnotationExporter {
-  const AnnotationExporter({Directory? temporaryDirectory})
-    : _temporaryDirectory = temporaryDirectory;
+  const AnnotationExporter({
+    Directory? temporaryDirectory,
+    this.maximumPages = 200,
+    this.maximumTotalPixels = 180000000,
+  }) : _temporaryDirectory = temporaryDirectory;
 
   final Directory? _temporaryDirectory;
+  final int maximumPages;
+  final int maximumTotalPixels;
 
   Future<File> export(String pdfPath, {String? password}) async {
     final marks = await _loadMarks(pdfPath);
@@ -26,13 +31,23 @@ class AnnotationExporter {
         pdfPath,
         passwordProvider: password == null ? null : () => password,
       );
+      validatePageCount(source.pages.length);
       final output = pw.Document();
       var exportedPages = 0;
+      var totalPixels = 0;
       for (final page in source.pages) {
         final pageMarks = marks
             .where((mark) => mark.page == page.pageNumber)
             .toList();
-        final scale = (1600 / page.width).clamp(1.0, 2.0);
+        final scale = (1440 / page.width).clamp(.5, 2.0);
+        final renderedPixels =
+            (page.width * scale).round() * (page.height * scale).round();
+        totalPixels += renderedPixels;
+        if (totalPixels > maximumTotalPixels) {
+          throw const AnnotationExportTooLarge(
+            'This annotated PDF is too large to export safely on this device.',
+          );
+        }
         final rendered = await page.render(
           fullWidth: page.width * scale,
           fullHeight: page.height * scale,
@@ -56,11 +71,28 @@ class AnnotationExporter {
             );
           }
           final image = pw.MemoryImage(data.buffer.asUint8List());
+          final pageText = (await page.loadText()).trim();
           output.addPage(
             pw.Page(
               pageFormat: pdf.PdfPageFormat(page.width, page.height),
               margin: pw.EdgeInsets.zero,
-              build: (_) => pw.Image(image, fit: pw.BoxFit.fill),
+              build: (_) => pw.Stack(
+                children: [
+                  pw.Positioned.fill(
+                    child: pw.Image(image, fit: pw.BoxFit.fill),
+                  ),
+                  if (pageText.isNotEmpty)
+                    pw.Positioned.fill(
+                      child: pw.Opacity(
+                        opacity: .01,
+                        child: pw.Text(
+                          pageText,
+                          style: const pw.TextStyle(fontSize: 1),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           );
           exportedPages++;
@@ -86,6 +118,14 @@ class AnnotationExporter {
     }
   }
 
+  void validatePageCount(int pageCount) {
+    if (pageCount > maximumPages) {
+      throw AnnotationExportTooLarge(
+        'Annotated export supports at most $maximumPages pages at once.',
+      );
+    }
+  }
+
   Future<List<AnnotationMark>> _loadMarks(String pdfPath) async {
     try {
       final sidecar = File('$pdfPath.papertrail-annotations.json');
@@ -94,8 +134,12 @@ class AnnotationExporter {
       return decoded
           .map((item) => AnnotationMark.fromJson(item as Map<String, dynamic>))
           .toList();
-    } catch (_) {
-      return const [];
+    } on FileSystemException {
+      rethrow;
+    } on FormatException {
+      rethrow;
+    } catch (error) {
+      throw FormatException('Annotations could not be read: $error');
     }
   }
 
@@ -141,7 +185,9 @@ class AnnotationExporter {
       if (path == null) return;
       final file = File(path);
       if (!await file.exists()) return;
-      final codec = await ui.instantiateImageCodec(await file.readAsBytes());
+      final codec = await ui.instantiateImageCodec(
+        await SignatureStore.readImageBytes(path),
+      );
       try {
         final frame = await codec.getNextFrame();
         try {
@@ -186,4 +232,13 @@ class AnnotationExporter {
       canvas.drawPath(path, paint);
     }
   }
+}
+
+class AnnotationExportTooLarge implements Exception {
+  const AnnotationExportTooLarge(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

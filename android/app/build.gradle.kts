@@ -10,10 +10,15 @@ plugins {
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
-val releaseSigningConfigured = keystorePropertiesFile.exists()
-if (releaseSigningConfigured) {
+if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use(keystoreProperties::load)
 }
+val requiredSigningProperties =
+    listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val releaseSigningConfigured =
+    requiredSigningProperties.all {
+        !keystoreProperties.getProperty(it).isNullOrBlank()
+    }
 val releaseRequested = gradle.startParameter.taskNames.any {
     it.contains("release", ignoreCase = true)
 }
