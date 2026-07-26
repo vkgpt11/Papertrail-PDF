@@ -207,6 +207,32 @@ void main() {
   runApp(const PapertrailApp());
 }
 
+Future<int> cleanupTemporaryDirectory(
+  Directory directory, {
+  required bool Function(File file) shouldDelete,
+  Duration timeLimit = const Duration(seconds: 2),
+  int maximumEntries = 2000,
+}) async {
+  if (!await directory.exists()) return 0;
+  final stopwatch = Stopwatch()..start();
+  var inspected = 0;
+  var deleted = 0;
+  await for (final entity in directory.list().timeout(timeLimit)) {
+    if (inspected >= maximumEntries || stopwatch.elapsed >= timeLimit) break;
+    inspected++;
+    if (entity is! File) continue;
+    try {
+      if (shouldDelete(entity)) {
+        await entity.delete();
+        deleted++;
+      }
+    } catch (_) {
+      // One locked temporary file must not stop startup cleanup.
+    }
+  }
+  return deleted;
+}
+
 Future<void> _cleanupTemporaryFiles() async {
   try {
     final now = DateTime.now();
@@ -215,23 +241,18 @@ Future<void> _cleanupTemporaryFiles() async {
       await getTemporaryDirectory(),
     ]) {
       try {
-        if (!await directory.exists()) continue;
-        await for (final entity in directory.list()) {
-          try {
-            if (entity is! File ||
-                (!entity.path.contains('papertrail-ocr-') &&
-                    !entity.path.contains('incoming-') &&
-                    !entity.path.contains('papertrail-annotated-'))) {
-              continue;
+        await cleanupTemporaryDirectory(
+          directory,
+          shouldDelete: (file) {
+            if (!file.path.contains('papertrail-ocr-') &&
+                !file.path.contains('incoming-') &&
+                !file.path.contains('papertrail-annotated-')) {
+              return false;
             }
-            final modified = (await entity.stat()).modified;
-            if (now.difference(modified) > const Duration(hours: 24)) {
-              await entity.delete();
-            }
-          } catch (_) {
-            // One locked temporary file must not stop startup cleanup.
-          }
-        }
+            return now.difference(file.statSync().modified) >
+                const Duration(hours: 24);
+          },
+        );
       } catch (_) {
         // Some platforms do not allow enumerating the system temp directory.
       }
@@ -241,17 +262,12 @@ Future<void> _cleanupTemporaryFiles() async {
       'papertrail-summaries',
     );
     if (await summaryDirectory.exists()) {
-      await for (final entity in summaryDirectory.list()) {
-        try {
-          if (entity is! File) continue;
-          final modified = (await entity.stat()).modified;
-          if (now.difference(modified) > const Duration(hours: 24)) {
-            await entity.delete();
-          }
-        } catch (_) {
-          // Summary cache cleanup is best effort.
-        }
-      }
+      await cleanupTemporaryDirectory(
+        summaryDirectory,
+        shouldDelete: (file) =>
+            now.difference(file.statSync().modified) >
+            const Duration(hours: 24),
+      );
     }
   } catch (_) {
     // Cleanup must never create an unhandled startup error.
@@ -517,10 +533,25 @@ class RecentDocument {
   );
 }
 
+class DocumentRenameException implements Exception {
+  const DocumentRenameException(this.actualDocument, this.cause);
+
+  final RecentDocument actualDocument;
+  final Object cause;
+
+  @override
+  String toString() => 'Rename rollback failed: $cause';
+}
+
 class DocumentStore {
+  DocumentStore({
+    Future<void> Function(File source, File target)? renameOperation,
+  }) : _renameOperation = renameOperation;
+
   static const _key = 'recent_documents_v1';
   static const _foldersKey = 'library_folders_v1';
   static const _secureStorage = FlutterSecureStorage();
+  final Future<void> Function(File source, File target)? _renameOperation;
 
   Future<void> _saveRaw(String raw) async {
     final prefs = await SharedPreferences.getInstance();
@@ -685,9 +716,20 @@ class DocumentStore {
         );
         try {
           await _renameFile(sourceAnnotations, targetAnnotations);
-        } catch (_) {
-          await _renameFile(target, source);
-          rethrow;
+        } catch (annotationError, annotationStack) {
+          try {
+            await _renameFile(target, source);
+          } catch (rollbackError) {
+            final actual = await target.exists() ? target : source;
+            throw DocumentRenameException(
+              document.copyWith(
+                name: actual.path == target.path ? safeName : document.name,
+                path: actual.path,
+              ),
+              rollbackError,
+            );
+          }
+          Error.throwWithStackTrace(annotationError, annotationStack);
         }
       }
     }
@@ -705,18 +747,34 @@ class DocumentStore {
         _comparablePath(source.path).toLowerCase() ==
             _comparablePath(target.path).toLowerCase();
     if (!caseOnly || !Platform.isWindows) {
-      await source.rename(target.path);
+      await _performRename(source, target);
       return;
     }
     final temporary = File(
       '${source.path}.${DateTime.now().microsecondsSinceEpoch}.rename',
     );
-    await source.rename(temporary.path);
+    await _performRename(source, temporary);
     try {
-      await temporary.rename(target.path);
-    } catch (_) {
-      await temporary.rename(source.path);
-      rethrow;
+      await _performRename(temporary, target);
+    } catch (renameError, renameStack) {
+      try {
+        await _performRename(temporary, source);
+      } catch (rollbackError) {
+        throw FileSystemException(
+          'Case-only rename and rollback both failed: $rollbackError',
+          temporary.path,
+        );
+      }
+      Error.throwWithStackTrace(renameError, renameStack);
+    }
+  }
+
+  Future<void> _performRename(File source, File target) async {
+    final operation = _renameOperation;
+    if (operation != null) {
+      await operation(source, target);
+    } else {
+      await source.rename(target.path);
     }
   }
 
@@ -2318,6 +2376,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await _store.save(_documents);
       await _searchIndex.rename(document.path, renamed.path);
       return renamed;
+    } on DocumentRenameException catch (error) {
+      final recovered = error.actualDocument;
+      if (!mounted) return null;
+      setState(() {
+        _documents = _documents
+            .map((item) => item.path == document.path ? recovered : item)
+            .toList();
+      });
+      await _store.save(_documents);
+      if (document.path != recovered.path) {
+        await _searchIndex.rename(document.path, recovered.path);
+      }
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'The PDF moved, but its annotations could not be renamed. '
+          'The library was recovered to the file’s actual location.',
+          isError: true,
+        );
+      }
+      return recovered;
     } catch (_) {
       if (mounted) {
         PapertrailNotice.show(

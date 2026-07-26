@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -48,28 +49,22 @@ class AnnotationExporter {
             'This annotated PDF is too large to export safely on this device.',
           );
         }
-        final rendered = await page.render(
-          fullWidth: page.width * scale,
-          fullHeight: page.height * scale,
+        final rendered = requireRenderedAnnotationPage(
+          await page.render(
+            fullWidth: page.width * scale,
+            fullHeight: page.height * scale,
+          ),
+          page.pageNumber,
         );
-        if (rendered == null) {
-          throw StateError(
-            'Page ${page.pageNumber} could not be rendered for export.',
-          );
-        }
         ui.Image? base;
         ui.Image? flattened;
         try {
           base = await rendered.createImage();
           flattened = await _flattenPage(base, pageMarks);
-          final data = await flattened.toByteData(
-            format: ui.ImageByteFormat.png,
+          final data = requireEncodedAnnotationPage(
+            await flattened.toByteData(format: ui.ImageByteFormat.png),
+            page.pageNumber,
           );
-          if (data == null) {
-            throw StateError(
-              'Page ${page.pageNumber} could not be encoded for export.',
-            );
-          }
           final image = pw.MemoryImage(data.buffer.asUint8List());
           final pageText = (await page.loadText()).trim();
           output.addPage(
@@ -232,6 +227,20 @@ class AnnotationExporter {
       canvas.drawPath(path, paint);
     }
   }
+}
+
+PdfImage requireRenderedAnnotationPage(PdfImage? rendered, int pageNumber) {
+  if (rendered == null) {
+    throw StateError('Page $pageNumber could not be rendered for export.');
+  }
+  return rendered;
+}
+
+ByteData requireEncodedAnnotationPage(ByteData? data, int pageNumber) {
+  if (data == null) {
+    throw StateError('Page $pageNumber could not be encoded for export.');
+  }
+  return data;
 }
 
 class AnnotationExportTooLarge implements Exception {

@@ -28,4 +28,30 @@ void main() {
       throwsA(isA<AnnotationExportTooLarge>()),
     );
   });
+
+  test('render failure stops export with the affected page number', () {
+    expect(
+      () => requireRenderedAnnotationPage(null, 7),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Page 7'),
+        ),
+      ),
+    );
+  });
+
+  test('encode failure stops export with the affected page number', () {
+    expect(
+      () => requireEncodedAnnotationPage(null, 9),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Page 9'),
+        ),
+      ),
+    );
+  });
 }

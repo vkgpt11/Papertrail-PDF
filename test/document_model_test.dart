@@ -121,6 +121,78 @@ void main() {
     expect(await File(renamed.path).exists(), isTrue);
   });
 
+  test('annotation rename failure restores the original PDF path', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-annotation-rollback-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/old.pdf');
+    final annotations = File('${source.path}.papertrail-annotations.json');
+    await source.writeAsBytes([1, 2, 3]);
+    await annotations.writeAsString('[]');
+    final document = RecentDocument(
+      name: 'old.pdf',
+      path: source.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2026),
+    );
+    final store = DocumentStore(
+      renameOperation: (from, to) async {
+        if (from.path.endsWith('.papertrail-annotations.json')) {
+          throw const FileSystemException('Injected annotation failure');
+        }
+        await from.rename(to.path);
+      },
+    );
+
+    await expectLater(
+      store.rename(document, 'new'),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(await source.exists(), isTrue);
+    expect(await File('${directory.path}/new.pdf').exists(), isFalse);
+    expect(await annotations.exists(), isTrue);
+  });
+
+  test('failed rollback reports the actual on-disk document path', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-rollback-recovery-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/old.pdf');
+    final annotations = File('${source.path}.papertrail-annotations.json');
+    await source.writeAsBytes([1, 2, 3]);
+    await annotations.writeAsString('[]');
+    final document = RecentDocument(
+      name: 'old.pdf',
+      path: source.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2026),
+    );
+    final store = DocumentStore(
+      renameOperation: (from, to) async {
+        if (from.path.endsWith('.papertrail-annotations.json') ||
+            (from.path.endsWith('new.pdf') && to.path.endsWith('old.pdf'))) {
+          throw const FileSystemException('Injected rollback failure');
+        }
+        await from.rename(to.path);
+      },
+    );
+
+    DocumentRenameException? failure;
+    try {
+      await store.rename(document, 'new');
+    } on DocumentRenameException catch (error) {
+      failure = error;
+    }
+
+    expect(failure, isNotNull);
+    expect(failure!.actualDocument.path, endsWith('new.pdf'));
+    expect(await File(failure.actualDocument.path).exists(), isTrue);
+    expect(await source.exists(), isFalse);
+  });
+
   test('single-file deletion removes the PDF and annotation sidecar', () async {
     final directory = await Directory.systemTemp.createTemp(
       'papertrail-delete-',
@@ -170,6 +242,28 @@ void main() {
     expect(sanitized, isNot(contains('Secret123')));
     expect(sanitized, contains('[PDF]'));
     expect(sanitized, contains('[redacted]'));
+  });
+
+  test('temporary cleanup stops at its configured entry budget', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-bounded-cleanup-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    for (var index = 0; index < 8; index++) {
+      await File(
+        '${directory.path}/papertrail-ocr-$index.png',
+      ).writeAsBytes([index]);
+    }
+
+    final deleted = await cleanupTemporaryDirectory(
+      directory,
+      shouldDelete: (_) => true,
+      maximumEntries: 3,
+      timeLimit: const Duration(seconds: 1),
+    );
+
+    expect(deleted, 3);
+    expect(await directory.list().length, 5);
   });
 }
 
