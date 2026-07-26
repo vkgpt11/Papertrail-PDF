@@ -27,6 +27,7 @@ class AnnotationExporter {
         passwordProvider: password == null ? null : () => password,
       );
       final output = pw.Document();
+      var exportedPages = 0;
       for (final page in source.pages) {
         final pageMarks = marks
             .where((mark) => mark.page == page.pageNumber)
@@ -36,7 +37,11 @@ class AnnotationExporter {
           fullWidth: page.width * scale,
           fullHeight: page.height * scale,
         );
-        if (rendered == null) continue;
+        if (rendered == null) {
+          throw StateError(
+            'Page ${page.pageNumber} could not be rendered for export.',
+          );
+        }
         ui.Image? base;
         ui.Image? flattened;
         try {
@@ -45,7 +50,11 @@ class AnnotationExporter {
           final data = await flattened.toByteData(
             format: ui.ImageByteFormat.png,
           );
-          if (data == null) continue;
+          if (data == null) {
+            throw StateError(
+              'Page ${page.pageNumber} could not be encoded for export.',
+            );
+          }
           final image = pw.MemoryImage(data.buffer.asUint8List());
           output.addPage(
             pw.Page(
@@ -54,12 +63,16 @@ class AnnotationExporter {
               build: (_) => pw.Image(image, fit: pw.BoxFit.fill),
             ),
           );
+          exportedPages++;
         } finally {
           flattened?.dispose();
           base?.dispose();
           rendered.dispose();
         }
         await Future<void>.delayed(Duration.zero);
+      }
+      if (exportedPages != source.pages.length) {
+        throw StateError('The annotated export is incomplete.');
       }
       final directory = _temporaryDirectory ?? await getTemporaryDirectory();
       final file = File(

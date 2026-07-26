@@ -44,6 +44,27 @@ jobs:
             "build-tools;35.0.0" \
             "ndk;27.0.12077973"
 
+      - name: Configure release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PAPERTRAIL_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.PAPERTRAIL_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.PAPERTRAIL_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.PAPERTRAIL_KEY_PASSWORD }}
+        run: |
+          for value in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!value}" ]]; then
+              echo "Required signing secret $value is missing." >&2
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/upload-keystore.jks
+          {
+            echo "storeFile=../upload-keystore.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
       - name: Install dependencies
         run: flutter pub get
 
@@ -54,19 +75,21 @@ jobs:
         run: flutter test
 
       - name: Build release APK
-        run: flutter build apk --release
+        run: |
+          BUILD_NUMBER=$((100000 + GITHUB_RUN_NUMBER))
+          flutter build apk --release --build-number "$BUILD_NUMBER"
 
       - name: Create versioned artifact and checksum
         id: package
         shell: bash
         run: |
-          VERSION="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)[[:space:]]*$/\1 \2/p' pubspec.yaml)"
-          if [[ -z "$VERSION" ]]; then
+          VERSION_NAME="$(sed -nE 's/^version:[[:space:]]*([0-9]+\.[0-9]+\.[0-9]+)\+[0-9]+[[:space:]]*$/\1/p' pubspec.yaml)"
+          if [[ -z "$VERSION_NAME" ]]; then
             echo "Could not parse version from pubspec.yaml" >&2
             exit 1
           fi
 
-          read -r VERSION_NAME BUILD_NUMBER <<< "$VERSION"
+          BUILD_NUMBER=$((100000 + GITHUB_RUN_NUMBER))
           APK_NAME="Papertrail-PDF-v${VERSION_NAME}-build${BUILD_NUMBER}.apk"
           mkdir -p release
           cp build/app/outputs/flutter-apk/app-release.apk "release/$APK_NAME"

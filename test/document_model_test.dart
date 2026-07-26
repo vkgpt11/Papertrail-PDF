@@ -77,6 +77,48 @@ void main() {
     expect(renamed.isFavorite, isTrue);
   });
 
+  test('case-only rename keeps a valid file path', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-case-rename-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/report.pdf');
+    await source.writeAsBytes([1, 2, 3]);
+    final original = RecentDocument(
+      name: 'report.pdf',
+      path: source.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2025),
+    );
+
+    final renamed = await DocumentStore().rename(original, 'Report');
+
+    expect(renamed.name, 'Report.pdf');
+    expect(await File(renamed.path).exists(), isTrue);
+    expect(File(renamed.path).path, endsWith('Report.pdf'));
+  });
+
+  test('rename reports the sanitized on-disk name', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'papertrail-safe-rename-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final source = File('${directory.path}/old.pdf');
+    await source.writeAsBytes([1, 2, 3]);
+    final original = RecentDocument(
+      name: 'old.pdf',
+      path: source.path,
+      openedAt: DateTime(2026),
+      documentDate: DateTime(2025),
+    );
+
+    final renamed = await DocumentStore().rename(original, 'safe:name');
+
+    expect(renamed.name, 'safe_name.pdf');
+    expect(renamed.path, endsWith('safe_name.pdf'));
+    expect(await File(renamed.path).exists(), isTrue);
+  });
+
   test('single-file deletion removes the PDF and annotation sidecar', () async {
     final directory = await Directory.systemTemp.createTemp(
       'papertrail-delete-',

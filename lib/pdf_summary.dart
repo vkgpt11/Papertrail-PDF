@@ -32,6 +32,22 @@ class PdfSummaryService {
 
   final LibrarySearchIndex _searchIndex;
 
+  static Future<Directory> _cacheDirectory() async => Directory(
+    '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
+    'papertrail-summaries',
+  );
+
+  static Future<void> clearCache() async {
+    try {
+      final directory = await _cacheDirectory();
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    } catch (_) {
+      // Cache cleanup is best-effort on unsupported platforms and tests.
+    }
+  }
+
   Future<PdfSummaryResult> summarize(
     String path, {
     String? password,
@@ -88,10 +104,7 @@ class PdfSummaryService {
           ),
         )
         .toString();
-    final directory = Directory(
-      '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
-      'papertrail-summaries',
-    );
+    final directory = await _cacheDirectory();
     await directory.create(recursive: true);
     return File('${directory.path}${Platform.pathSeparator}$key.json');
   }
