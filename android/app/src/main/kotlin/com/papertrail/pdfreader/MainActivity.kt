@@ -18,7 +18,10 @@ class MainActivity : FlutterActivity() {
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         channel?.setMethodCallHandler { call, result ->
             if (call.method == "getInitialPdf") {
-                if (pendingPdf == null) pendingPdf = cachePdf(intent)
+                if (pendingPdf == null) {
+                    pendingPdf = cachePdf(intent)
+                    if (pendingPdf != null) setIntent(Intent())
+                }
                 result.success(pendingPdf)
                 pendingPdf = null
             } else {
@@ -29,26 +32,52 @@ class MainActivity : FlutterActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
         val pdf = cachePdf(intent) ?: return
-        channel?.invokeMethod("openPdf", pdf)
+        setIntent(Intent())
+        pendingPdf = pdf
+        channel?.invokeMethod("openPdf", pdf, object : MethodChannel.Result {
+            override fun success(result: Any?) {
+                if (pendingPdf == pdf) pendingPdf = null
+            }
+
+            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                // Keep the cached PDF pending so Flutter can recover it later.
+            }
+
+            override fun notImplemented() {
+                // Keep the cached PDF pending so Flutter can recover it later.
+            }
+        })
     }
 
     private fun cachePdf(intent: Intent?): Map<String, String>? {
         if (intent?.action != Intent.ACTION_VIEW && intent?.action != Intent.ACTION_SEND) return null
-        val uri: Uri = if (intent.action == Intent.ACTION_SEND) {
-            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-        } else {
-            intent.data
-        } ?: return null
-        val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
-            ?.use { cursor ->
+        var target: File? = null
+        return try {
+            val uri: Uri = if (intent.action == Intent.ACTION_SEND) {
+                intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                    ?: intent.clipData?.getItemAt(0)?.uri
+            } else {
+                intent.data
+            } ?: return null
+            val name = contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
-            } ?: "document.pdf"
-        val target = File(cacheDir, "incoming-${System.currentTimeMillis()}.pdf")
-        contentResolver.openInputStream(uri)?.use { input ->
-            target.outputStream().use { output -> input.copyTo(output) }
-        } ?: return null
-        return mapOf("path" to target.absolutePath, "name" to name)
+            } ?: uri.lastPathSegment ?: "document.pdf"
+            val cachedFile = File(cacheDir, "incoming-${System.currentTimeMillis()}.pdf")
+            target = cachedFile
+            contentResolver.openInputStream(uri)?.use { input ->
+                cachedFile.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+            mapOf("path" to cachedFile.absolutePath, "name" to name)
+        } catch (_: Exception) {
+            target?.delete()
+            null
+        }
     }
 }

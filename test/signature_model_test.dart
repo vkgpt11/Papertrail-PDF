@@ -1,3 +1,4 @@
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf_reader/signatures.dart';
 
@@ -32,5 +33,22 @@ void main() {
 
     expect(restored.kind, StoredSignatureKind.image);
     expect(restored.imagePath, signature.imagePath);
+  });
+
+  test('signature image payload is encrypted and authenticated', () async {
+    final key = await AesGcm.with256bits().newSecretKey();
+    final original = List<int>.generate(256, (index) => index);
+
+    final encrypted = await encryptSignaturePayload(original, key);
+    final restored = await decryptSignaturePayload(encrypted, key);
+
+    expect(encrypted, isNot(containsAllInOrder(original)));
+    expect(restored, original);
+
+    encrypted[encrypted.length ~/ 2] ^= 1;
+    await expectLater(
+      decryptSignaturePayload(encrypted, key),
+      throwsA(anything),
+    );
   });
 }

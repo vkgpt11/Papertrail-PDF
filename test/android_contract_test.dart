@@ -23,9 +23,70 @@ void main() {
     expect(workflow, contains('flutter analyze'));
     expect(workflow, contains('flutter test'));
     expect(workflow, contains('flutter build apk --release'));
+    expect(workflow, contains('100000 + GITHUB_RUN_NUMBER'));
     expect(workflow, contains('Papertrail-PDF-v\${VERSION_NAME}'));
     expect(workflow, contains('actions/upload-artifact@v4'));
     expect(workflow, contains('retention-days: 30'));
+    expect(workflow, contains('PAPERTRAIL_KEYSTORE_BASE64'));
+    expect(workflow, contains('PAPERTRAIL_KEYSTORE_PASSWORD'));
+    expect(workflow, contains('PAPERTRAIL_KEY_ALIAS'));
+    expect(workflow, contains('PAPERTRAIL_KEY_PASSWORD'));
+    final gradle = File('android/app/build.gradle.kts').readAsStringSync();
+    expect(gradle, contains('releaseSigningConfigured'));
+    expect(gradle, contains('signingConfigs.getByName("release")'));
+    expect(gradle, isNot(contains('signingConfigs.getByName("debug")')));
+    expect(File('android/key.properties.example').existsSync(), isTrue);
+  });
+
+  test('runtime reliability paths retain data and fail safely', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    final android = File(
+      'android/app/src/main/kotlin/com/papertrail/pdfreader/MainActivity.kt',
+    ).readAsStringSync();
+    final exporter = File('lib/annotation_export.dart').readAsStringSync();
+    final summary = File('lib/pdf_summary.dart').readAsStringSync();
+    final signatures = File('lib/signatures.dart').readAsStringSync();
+    final ios = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+    final iosPlist = File('ios/Runner/Info.plist').readAsStringSync();
+
+    expect(source, contains('Future<void> _saveRaw(String raw)'));
+    expect(source, contains('await prefs.setString(_key, raw)'));
+    expect(source, contains('await _renameFile(source, target)'));
+    expect(source, contains('await _performCopy(target, source)'));
+    expect(source, contains('annotationSidecarPath'));
+    expect(source, contains('late final Future<void> _initialization'));
+    expect(source, contains('await _initialization'));
+    expect(source, contains('setMethodCallHandler(null)'));
+    expect(source, contains('result.failed'));
+    expect(source, contains('fingerprint: document.fingerprint'));
+    expect(source, contains('Override system brightness'));
+    expect(source, contains('prefs.remove(\'brightness_reader\')'));
+    expect(source, contains('_brightnessOverride = true'));
+    expect(source, contains('PdfSummaryService.clearCache()'));
+    expect(source, contains('Keep loading valid entries'));
+    expect(source, contains('known.remove(fingerprint)'));
+    expect(source, contains('Papertrail could not load the library.'));
+    expect(source, contains('One locked temporary file'));
+    expect(source, contains('512 * 1024'));
+    expect(source, contains('sanitizeCrashMessage'));
+    expect(summary, contains('static Future<void> clearCache()'));
+
+    expect(android, contains('pendingPdf = pdf'));
+    expect(android, contains('object : MethodChannel.Result'));
+    expect(android, contains('catch (_: Exception)'));
+    expect(android, contains('intent.clipData?.getItemAt(0)?.uri'));
+
+    expect(exporter, contains('could not be rendered for export'));
+    expect(exporter, contains('could not be encoded for export'));
+    expect(exporter, contains('requireRenderedAnnotationPage'));
+    expect(exporter, contains('requireEncodedAnnotationPage'));
+    expect(exporter, contains('maximumTotalPixels'));
+    expect(source, contains('Saved annotations are damaged'));
+    expect(signatures, contains('AesGcm.with256bits()'));
+    expect(signatures, contains('FlutterSecureStorage'));
+    expect(signatures, contains('.ptsig'));
+    expect(ios, contains('self?.pendingPdf = nil'));
+    expect(iosPlist, isNot(contains('UIFileSharingEnabled')));
   });
 
   test('installation, launch, and in-app branding share one logo', () {
@@ -355,6 +416,7 @@ void main() {
     expect(annotations, contains('mark.page == page'));
     expect(annotations, contains('_writeAtomically'));
     expect(annotations, contains('while (_saveInProgress != null)'));
+    expect(annotations, contains('Future<void> waitForPendingSave()'));
   });
 
   test('search indexing is cached, serialized, and path-consistent', () {

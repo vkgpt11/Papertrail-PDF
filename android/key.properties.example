@@ -1,0 +1,5 @@
+# Copy this file to android/key.properties. Never commit the populated file.
+storeFile=C:/secure/location/papertrail-upload.jks
+storePassword=replace-with-keystore-password
+keyAlias=papertrail-upload
+keyPassword=replace-with-key-password

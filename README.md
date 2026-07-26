@@ -8,7 +8,7 @@
   [![Flutter](https://img.shields.io/badge/Flutter-3.32%2B-02569B?logo=flutter)](https://flutter.dev)
   [![Android](https://img.shields.io/badge/Android-supported-3DDC84?logo=android&logoColor=white)](#platform-status)
   [![iOS](https://img.shields.io/badge/iOS-source%20available-000000?logo=apple)](#platform-status)
-  [![Tests](https://img.shields.io/badge/tests-58%20passing-brightgreen)](#testing)
+  [![Tests](https://img.shields.io/badge/tests-81%20passing-brightgreen)](#testing)
   [![Privacy](https://img.shields.io/badge/privacy-offline--first-6558D3)](store/PRIVACY_POLICY.md)
 </div>
 
@@ -22,7 +22,8 @@
 Papertrail is designed for people who want capable PDF reading without creating
 an account or sending their document library to a remote service. PDFs, search
 indexes, reading progress, signatures, annotations, and crash diagnostics stay
-on the device.
+on the device. Saved signature metadata and imported signature images are
+encrypted with a device-protected key.
 
 ## 🚀 Highlights
 
@@ -191,21 +192,31 @@ The same script can create a Google Play App Bundle or both release formats:
 Every push to `main`, including a merged pull request, runs the
 **Android build after merge** GitHub Actions workflow. The workflow analyzes and
 tests the application, creates a versioned APK such as
-`Papertrail-PDF-v1.5.3-build28.apk`, generates its SHA-256 checksum, and keeps
-both files as a downloadable workflow artifact for 30 days.
+`Papertrail-PDF-v1.5.3-build100042.apk`, generates its SHA-256 checksum, and
+keeps both files as a downloadable workflow artifact for 30 days. Automated
+build numbers use `100000 + GITHUB_RUN_NUMBER`, so every merged build has a
+distinct Android version code even when the marketing version is unchanged.
 
 Open the repository's **Actions** tab, select the completed workflow run, and
 download the artifact from its **Artifacts** section. The workflow can also be
 started manually with **Run workflow**.
 
-> [!NOTE]
-> Automated APKs use the repository's current local-testing signing
-> configuration. Configure protected GitHub secrets and a private upload
-> keystore before using automation to produce Google Play release artifacts.
+Automated builds use one permanent Papertrail upload key stored through these
+encrypted GitHub Actions secrets:
+
+- `PAPERTRAIL_KEYSTORE_BASE64`
+- `PAPERTRAIL_KEYSTORE_PASSWORD`
+- `PAPERTRAIL_KEY_ALIAS`
+- `PAPERTRAIL_KEY_PASSWORD`
+
+The keystore itself is never committed. Back it up securely: future APK updates
+must be signed with the same certificate.
 
 To build manually without the versioned filename:
 
 ```sh
+cp android/key.properties.example android/key.properties
+# Edit android/key.properties with the secure local keystore values.
 flutter build apk --release
 ```
 
@@ -228,10 +239,9 @@ release\Papertrail-PDF-vX.Y.Z-buildN.aab
 ```
 
 > [!WARNING]
-> The checked-in Android configuration uses debug signing for local release
-> testing. Configure a private upload keystore and secure release-signing
-> properties before uploading an App Bundle to Google Play. Never commit
-> keystores, passwords, or `key.properties`.
+> Never commit a keystore, its passwords, or `android/key.properties`. Losing
+> the upload key can prevent direct APK updates and requires the relevant store
+> key-reset or recovery process.
 
 ## 🍎 Building iOS
 

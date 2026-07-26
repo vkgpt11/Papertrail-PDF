@@ -171,10 +171,36 @@ int? validPageTarget(String value, int pageCount) {
   return page;
 }
 
-Future<void> deleteDocumentArtifacts(String pdfPath) async {
+String comparableFilePath(String path) {
+  final candidate = Platform.isWindows ? path.replaceAll('/', r'\') : path;
+  final absolute = File(
+    candidate,
+  ).absolute.uri.normalizePath().toFilePath(windows: Platform.isWindows);
+  return Platform.isWindows ? absolute.replaceAll('/', r'\') : absolute;
+}
+
+Future<void> deleteDocumentArtifacts(
+  String pdfPath, {
+  String? fingerprint,
+}) async {
   for (final path in [pdfPath, '$pdfPath.papertrail-annotations.json']) {
     final file = File(path);
     if (await file.exists()) await file.delete();
+  }
+  await PdfSummaryService.clearCache();
+  if (fingerprint != null) {
+    final prefs = await SharedPreferences.getInstance();
+    for (final key in [
+      'resume_$fingerprint',
+      'bookmarks_$fingerprint',
+      'zoom_$fingerprint',
+      'centerX_$fingerprint',
+      'centerY_$fingerprint',
+      'spacing_$fingerprint',
+      'rtl_$fingerprint',
+    ]) {
+      await prefs.remove(key);
+    }
   }
 }
 
@@ -189,25 +215,70 @@ void main() {
   runApp(const PapertrailApp());
 }
 
-Future<void> _cleanupTemporaryFiles() async {
-  final now = DateTime.now();
-  for (final directory in [
-    Directory.systemTemp,
-    await getTemporaryDirectory(),
-  ]) {
-    if (!await directory.exists()) continue;
-    await for (final entity in directory.list()) {
-      if (entity is! File ||
-          (!entity.path.contains('papertrail-ocr-') &&
-              !entity.path.contains('incoming-') &&
-              !entity.path.contains('papertrail-annotated-'))) {
-        continue;
-      }
-      final modified = (await entity.stat()).modified;
-      if (now.difference(modified) > const Duration(hours: 24)) {
+Future<int> cleanupTemporaryDirectory(
+  Directory directory, {
+  required bool Function(File file) shouldDelete,
+  Duration timeLimit = const Duration(seconds: 2),
+  int maximumEntries = 2000,
+}) async {
+  if (!await directory.exists()) return 0;
+  final stopwatch = Stopwatch()..start();
+  var inspected = 0;
+  var deleted = 0;
+  await for (final entity in directory.list().timeout(timeLimit)) {
+    if (inspected >= maximumEntries || stopwatch.elapsed >= timeLimit) break;
+    inspected++;
+    if (entity is! File) continue;
+    try {
+      if (shouldDelete(entity)) {
         await entity.delete();
+        deleted++;
+      }
+    } catch (_) {
+      // One locked temporary file must not stop startup cleanup.
+    }
+  }
+  return deleted;
+}
+
+Future<void> _cleanupTemporaryFiles() async {
+  try {
+    final now = DateTime.now();
+    for (final directory in [
+      Directory.systemTemp,
+      await getTemporaryDirectory(),
+    ]) {
+      try {
+        await cleanupTemporaryDirectory(
+          directory,
+          shouldDelete: (file) {
+            if (!file.path.contains('papertrail-ocr-') &&
+                !file.path.contains('incoming-') &&
+                !file.path.contains('papertrail-annotated-')) {
+              return false;
+            }
+            return now.difference(file.statSync().modified) >
+                const Duration(hours: 24);
+          },
+        );
+      } catch (_) {
+        // Some platforms do not allow enumerating the system temp directory.
       }
     }
+    final summaryDirectory = Directory(
+      '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
+      'papertrail-summaries',
+    );
+    if (await summaryDirectory.exists()) {
+      await cleanupTemporaryDirectory(
+        summaryDirectory,
+        shouldDelete: (file) =>
+            now.difference(file.statSync().modified) >
+            const Duration(hours: 24),
+      );
+    }
+  } catch (_) {
+    // Cleanup must never create an unhandled startup error.
   }
 }
 
@@ -217,8 +288,14 @@ Future<void> _writePrivateCrashLog(String message) async {
     final file = File(
       '${directory.path}${Platform.pathSeparator}papertrail-crash.log',
     );
+    if (await file.exists() && await file.length() > 512 * 1024) {
+      final previous = File('${file.path}.previous');
+      if (await previous.exists()) await previous.delete();
+      await file.rename(previous.path);
+    }
+    final sanitized = sanitizeCrashMessage(message);
     await file.writeAsString(
-      '${DateTime.now().toIso8601String()} $message\n',
+      '${DateTime.now().toIso8601String()} $sanitized\n',
       mode: FileMode.append,
       flush: true,
     );
@@ -226,6 +303,13 @@ Future<void> _writePrivateCrashLog(String message) async {
     // Diagnostics are local-only and must never cause another failure.
   }
 }
+
+String sanitizeCrashMessage(String message) => message
+    .replaceAll(RegExp(r'([A-Za-z]:)?[/\\][^\s]+\.pdf'), '[PDF]')
+    .replaceAll(
+      RegExp(r'password\s*[:=]\s*\S+', caseSensitive: false),
+      'password=[redacted]',
+    );
 
 class PapertrailApp extends StatefulWidget {
   const PapertrailApp({super.key});
@@ -457,10 +541,53 @@ class RecentDocument {
   );
 }
 
+class FileRenameRecoveryException implements Exception {
+  const FileRenameRecoveryException(this.actualFile, this.message);
+
+  final File actualFile;
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+class DocumentRenameException implements Exception {
+  const DocumentRenameException(
+    this.actualDocument,
+    this.cause, {
+    this.annotationSidecarPath,
+  });
+
+  final RecentDocument actualDocument;
+  final Object cause;
+  final String? annotationSidecarPath;
+
+  @override
+  String toString() => 'Rename rollback failed: $cause';
+}
+
 class DocumentStore {
+  DocumentStore({
+    Future<void> Function(File source, File target)? renameOperation,
+    Future<void> Function(File source, File target)? copyOperation,
+  }) : _renameOperation = renameOperation,
+       _copyOperation = copyOperation;
+
   static const _key = 'recent_documents_v1';
   static const _foldersKey = 'library_folders_v1';
   static const _secureStorage = FlutterSecureStorage();
+  final Future<void> Function(File source, File target)? _renameOperation;
+  final Future<void> Function(File source, File target)? _copyOperation;
+
+  Future<void> _saveRaw(String raw) async {
+    final prefs = await SharedPreferences.getInstance();
+    try {
+      await _secureStorage.write(key: _key, value: raw);
+      await prefs.remove(_key);
+    } catch (_) {
+      await prefs.setString(_key, raw);
+    }
+  }
 
   Future<List<RecentDocument>> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -473,39 +600,47 @@ class DocumentStore {
     raw ??= prefs.getString(_key);
     if (raw == null) return [];
     try {
-      final stored = (jsonDecode(raw) as List).map(
-        (item) => RecentDocument.fromJson(item as Map<String, dynamic>),
-      );
+      final stored = jsonDecode(raw) as List;
       final fingerprints = <String>{};
       final unique = <RecentDocument>[];
       var changed = false;
-      for (final document in stored) {
-        final file = File(document.path);
-        if (!await file.exists()) {
+      for (final item in stored) {
+        try {
+          final document = RecentDocument.fromJson(
+            item as Map<String, dynamic>,
+          );
+          final file = File(document.path);
+          if (!await file.exists()) {
+            changed = true;
+            continue;
+          }
+          final fingerprint = document.fingerprint ?? await _fingerprint(file);
+          if (!fingerprints.add(fingerprint)) {
+            changed = true;
+            continue;
+          }
+          var updated = document.copyWith(fingerprint: fingerprint);
+          final recoveredPage = prefs.getInt('resume_$fingerprint');
+          if (recoveredPage != null && recoveredPage > 0) {
+            updated = updated.copyWith(
+              page: recoveredPage,
+              hasBeenOpened: true,
+            );
+          }
+          if (document.fileSize <= 0 || document.pageCount <= 0) {
+            updated = await _withFileDetails(updated, file);
+            changed = true;
+          }
+          unique.add(updated);
+          changed = changed || document.fingerprint == null;
+        } catch (_) {
+          // Keep loading valid entries when one PDF or metadata record is bad.
           changed = true;
-          continue;
         }
-        final fingerprint = document.fingerprint ?? await _fingerprint(file);
-        if (!fingerprints.add(fingerprint)) {
-          changed = true;
-          continue;
-        }
-        var updated = document.copyWith(fingerprint: fingerprint);
-        final recoveredPage = prefs.getInt('resume_$fingerprint');
-        if (recoveredPage != null && recoveredPage > 0) {
-          updated = updated.copyWith(page: recoveredPage, hasBeenOpened: true);
-        }
-        if (document.fileSize <= 0 || document.pageCount <= 0) {
-          updated = await _withFileDetails(updated, file);
-          changed = true;
-        }
-        unique.add(updated);
-        changed = changed || document.fingerprint == null;
       }
       if (changed) {
-        await _secureStorage.write(
-          key: _key,
-          value: jsonEncode(unique.map((item) => item.toJson()).toList()),
+        await _saveRaw(
+          jsonEncode(unique.map((item) => item.toJson()).toList()),
         );
       }
       return unique;
@@ -562,10 +697,7 @@ class DocumentStore {
   }
 
   Future<void> save(List<RecentDocument> documents) async {
-    await _secureStorage.write(
-      key: _key,
-      value: jsonEncode(documents.map((item) => item.toJson()).toList()),
-    );
+    await _saveRaw(jsonEncode(documents.map((item) => item.toJson()).toList()));
   }
 
   Future<List<String>> loadFolders() async {
@@ -590,15 +722,24 @@ class DocumentStore {
     final separator = Platform.pathSeparator;
     final parent = source.parent.path;
     var target = File('$parent$separator$safeName');
-    if (target.path.toLowerCase() != source.path.toLowerCase() &&
-        await target.exists()) {
+    final sameIgnoringCase =
+        comparableFilePath(target.path).toLowerCase() ==
+        comparableFilePath(source.path).toLowerCase();
+    if (!sameIgnoringCase && await target.exists()) {
       final base = safeName.substring(0, safeName.length - 4);
       target = File(
         '$parent$separator$base-${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
     }
     if (target.path != source.path) {
-      await source.rename(target.path);
+      try {
+        await _renameFile(source, target);
+      } on FileRenameRecoveryException catch (error) {
+        throw DocumentRenameException(
+          document.copyWith(name: safeName, path: error.actualFile.path),
+          error,
+        );
+      }
       final sourceAnnotations = File(
         '${source.path}.papertrail-annotations.json',
       );
@@ -607,24 +748,99 @@ class DocumentStore {
           '${target.path}.papertrail-annotations.json',
         );
         try {
-          await sourceAnnotations.rename(targetAnnotations.path);
-        } catch (_) {
-          await target.rename(source.path);
-          rethrow;
+          await _renameFile(sourceAnnotations, targetAnnotations);
+        } catch (annotationError, annotationStack) {
+          try {
+            await _renameFile(target, source);
+          } catch (rollbackError) {
+            Object? copyError;
+            try {
+              await _performCopy(target, source);
+              await target.delete();
+            } catch (error) {
+              copyError = error;
+            }
+            if (copyError == null) {
+              Error.throwWithStackTrace(annotationError, annotationStack);
+            }
+            final actual = await target.exists() ? target : source;
+            throw DocumentRenameException(
+              document.copyWith(
+                name: actual.path == target.path ? safeName : document.name,
+                path: actual.path,
+              ),
+              '$rollbackError; copy recovery failed: $copyError',
+              annotationSidecarPath: await sourceAnnotations.exists()
+                  ? sourceAnnotations.path
+                  : null,
+            );
+          }
+          Error.throwWithStackTrace(annotationError, annotationStack);
         }
       }
     }
-    return document.copyWith(name: name, path: target.path);
+    return document.copyWith(name: safeName, path: target.path);
   }
 
-  Future<({List<RecentDocument> documents, int skipped})> scanFolder(
-    List<RecentDocument> existing,
-  ) async {
+  Future<void> _renameFile(File source, File target) async {
+    final caseOnly =
+        comparableFilePath(source.path) != comparableFilePath(target.path) &&
+        comparableFilePath(source.path).toLowerCase() ==
+            comparableFilePath(target.path).toLowerCase();
+    if (!caseOnly || !Platform.isWindows) {
+      await _performRename(source, target);
+      return;
+    }
+    final temporary = File(
+      '${source.path}.${DateTime.now().microsecondsSinceEpoch}.rename',
+    );
+    await _performRename(source, temporary);
+    try {
+      await _performRename(temporary, target);
+    } catch (renameError, renameStack) {
+      try {
+        await _performRename(temporary, source);
+      } catch (rollbackError) {
+        try {
+          await _performCopy(temporary, source);
+          await temporary.delete();
+        } catch (copyError) {
+          throw FileRenameRecoveryException(
+            temporary,
+            'Case-only rename, rollback, and copy recovery failed: '
+            '$rollbackError; $copyError',
+          );
+        }
+      }
+      Error.throwWithStackTrace(renameError, renameStack);
+    }
+  }
+
+  Future<void> _performRename(File source, File target) async {
+    final operation = _renameOperation;
+    if (operation != null) {
+      await operation(source, target);
+    } else {
+      await source.rename(target.path);
+    }
+  }
+
+  Future<void> _performCopy(File source, File target) async {
+    final operation = _copyOperation;
+    if (operation != null) {
+      await operation(source, target);
+    } else {
+      await source.copy(target.path);
+    }
+  }
+
+  Future<({List<RecentDocument> documents, int skipped, int failed})>
+  scanFolder(List<RecentDocument> existing) async {
     final selectedPath = await FilePicker.getDirectoryPath(
       dialogTitle: 'Choose a folder containing PDFs',
     );
     if (selectedPath == null) {
-      return (documents: <RecentDocument>[], skipped: 0);
+      return (documents: <RecentDocument>[], skipped: 0, failed: 0);
     }
     final appDir = await getApplicationDocumentsDirectory();
     final library = Directory('${appDir.path}${Platform.pathSeparator}library');
@@ -635,39 +851,51 @@ class DocumentStore {
         .toSet();
     final imported = <RecentDocument>[];
     var skipped = 0;
+    var failed = 0;
     await for (final entity in Directory(
       selectedPath,
     ).list(recursive: true, followLinks: false)) {
       if (entity is! File || !entity.path.toLowerCase().endsWith('.pdf')) {
         continue;
       }
-      final fingerprint = await _fingerprint(entity);
-      final documentDate = await _documentDate(entity);
-      if (!known.add(fingerprint)) {
-        skipped++;
-        continue;
-      }
-      final name = entity.uri.pathSegments.last;
-      final safeName = name.replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
-      final target = File(
-        '${library.path}${Platform.pathSeparator}${DateTime.now().microsecondsSinceEpoch}-$safeName',
-      );
-      await entity.copy(target.path);
-      imported.add(
-        await _withFileDetails(
-          RecentDocument(
-            name: name,
-            path: target.path,
-            openedAt: DateTime.now(),
-            documentDate: documentDate,
-            hasBeenOpened: false,
-            fingerprint: fingerprint,
+      File? target;
+      String? fingerprint;
+      try {
+        fingerprint = await _fingerprint(entity);
+        final documentDate = await _documentDate(entity);
+        if (!known.add(fingerprint)) {
+          skipped++;
+          continue;
+        }
+        final name = entity.uri.pathSegments.last;
+        final safeName = name.replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
+        target = File(
+          '${library.path}${Platform.pathSeparator}'
+          '${DateTime.now().microsecondsSinceEpoch}-$safeName',
+        );
+        await entity.copy(target.path);
+        imported.add(
+          await _withFileDetails(
+            RecentDocument(
+              name: name,
+              path: target.path,
+              openedAt: DateTime.now(),
+              documentDate: documentDate,
+              hasBeenOpened: false,
+              fingerprint: fingerprint,
+            ),
+            target,
           ),
-          target,
-        ),
-      );
+        );
+      } catch (_) {
+        if (fingerprint != null) known.remove(fingerprint);
+        failed++;
+        if (target != null && await target.exists()) {
+          await target.delete();
+        }
+      }
     }
-    return (documents: imported, skipped: skipped);
+    return (documents: imported, skipped: skipped, failed: failed);
   }
 
   Future<
@@ -965,6 +1193,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _importantHighlightsEnabled = false;
   String _libraryQuery = '';
   bool _loading = true;
+  String? _loadError;
   bool _scanning = false;
   bool _scanningDocument = false;
   String _appVersion = '';
@@ -972,25 +1201,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _scanSinglePage = false;
   int _scanPageLimit = 20;
   PapertrailScanSource _scanSource = PapertrailScanSource.camera;
+  late final Future<void> _initialization;
 
   @override
   void initState() {
     super.initState();
+    _initialization = _load();
     _openPdfChannel.setMethodCallHandler((call) async {
       if (call.method == 'openPdf') {
+        await _initialization;
+        if (!mounted) return;
         await _handleExternalPdf(Map<Object?, Object?>.from(call.arguments));
       }
     });
-    _load();
   }
 
   @override
   void dispose() {
+    _openPdfChannel.setMethodCallHandler(null);
     _librarySearchController.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    try {
+      await _loadData();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadError = 'Papertrail could not load the library.';
+        });
+      }
+      try {
+        final initial = await _openPdfChannel.invokeMapMethod<Object?, Object?>(
+          'getInitialPdf',
+        );
+        if (initial != null && mounted) await _handleExternalPdf(initial);
+      } catch (_) {
+        // The library remains usable and offers an explicit retry.
+      }
+    }
+  }
+
+  Future<void> _loadData() async {
     final results = await Future.wait([
       _store.load(),
       _store.loadFolders(),
@@ -1001,6 +1255,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final packageInfo = results[2] as PackageInfo;
     if (mounted) {
       setState(() {
+        _loadError = null;
         _documents = documents;
         _folders = folders;
         _appVersion =
@@ -1048,6 +1303,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 )
                 .whereType<HeaderAction>()
                 .toSet();
+      if (!mounted) return;
       setState(() {
         _recentSearches = prefs.getStringList('recent_library_searches') ?? [];
         _enabledSorts = enabledSorts;
@@ -1089,6 +1345,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             : _enabledSorts.first;
       });
       unawaited(_indexDocuments(documents));
+      if (!mounted) return;
       final initial = await _openPdfChannel.invokeMapMethod<Object?, Object?>(
         'getInitialPdf',
       );
@@ -1584,10 +1841,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
       if (!mounted) return;
       final message = result.documents.isEmpty
-          ? result.skipped > 0
+          ? result.failed > 0
+                ? 'No PDFs were added. ${result.failed} files could not be read.'
+                : result.skipped > 0
                 ? 'No new PDFs found. Existing files were skipped.'
                 : 'No PDFs found in that folder.'
-          : '${result.documents.length} PDFs added from the folder.';
+          : '${result.documents.length} PDFs added'
+                '${result.failed > 0 ? '; ${result.failed} could not be read' : ''}.';
       PapertrailNotice.show(context, message, icon: Icons.folder_outlined);
     } catch (_) {
       if (mounted) {
@@ -2060,13 +2320,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
             .firstOrNull ??
         document;
     if (page == _readerDeletedResult) {
+      await deleteDocumentArtifacts(
+        currentDocument.path,
+        fingerprint: currentDocument.fingerprint,
+      );
+      await _searchIndex.remove(currentDocument.path);
+      if (!mounted) return;
       setState(
         () =>
             _documents.removeWhere((item) => item.path == currentDocument.path),
       );
       await _store.save(_documents);
-      await deleteDocumentArtifacts(currentDocument.path);
-      await _searchIndex.remove(currentDocument.path);
       return;
     }
     setState(() {
@@ -2110,12 +2374,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    await deleteDocumentArtifacts(
+      document.path,
+      fingerprint: document.fingerprint,
+    );
+    await _searchIndex.remove(document.path);
+    if (!mounted) return;
     setState(
       () => _documents.removeWhere((item) => item.path == document.path),
     );
     await _store.save(_documents);
-    await deleteDocumentArtifacts(document.path);
-    await _searchIndex.remove(document.path);
   }
 
   Future<RecentDocument?> _rename(RecentDocument document) async {
@@ -2164,6 +2432,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await _store.save(_documents);
       await _searchIndex.rename(document.path, renamed.path);
       return renamed;
+    } on DocumentRenameException catch (error) {
+      final recovered = error.actualDocument;
+      if (!mounted) return null;
+      setState(() {
+        _documents = _documents
+            .map((item) => item.path == document.path ? recovered : item)
+            .toList();
+      });
+      await _store.save(_documents);
+      if (document.path != recovered.path) {
+        await _searchIndex.rename(document.path, recovered.path);
+      }
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'The PDF moved, but its annotations could not be renamed. '
+          'The library was recovered to the file’s actual location.',
+          isError: true,
+        );
+      }
+      return recovered;
     } catch (_) {
       if (mounted) {
         PapertrailNotice.show(
@@ -2322,8 +2611,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       builder: (context) => AlertDialog(
         title: Text('Remove $count PDFs from Papertrail?'),
         content: const Text(
-          'The files will no longer appear in the library. '
-          'This does not delete the files.',
+          'The selected Papertrail library copies and their annotations will '
+          'be deleted. Original files in Downloads, Drive, or other apps are '
+          'not affected.',
         ),
         actions: [
           TextButton(
@@ -2339,16 +2629,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
     if (confirmed != true || !mounted) return;
     final removedPaths = {..._selectedDocumentPaths};
+    final removedDocuments = _documents
+        .where((document) => removedPaths.contains(document.path))
+        .toList();
+    for (final document in removedDocuments) {
+      await deleteDocumentArtifacts(
+        document.path,
+        fingerprint: document.fingerprint,
+      );
+      await _searchIndex.remove(document.path);
+    }
+    if (!mounted) return;
     setState(() {
       _documents.removeWhere(
-        (document) => _selectedDocumentPaths.contains(document.path),
+        (document) => removedPaths.contains(document.path),
       );
       _selectedDocumentPaths.clear();
     });
     await _store.save(_documents);
-    for (final path in removedPaths) {
-      await _searchIndex.remove(path);
-    }
   }
 
   Future<void> _deleteSelectedFromDevice() async {
@@ -2376,7 +2674,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
     if (confirmed != true || !mounted) return;
     for (final document in selected) {
-      await deleteDocumentArtifacts(document.path);
+      await deleteDocumentArtifacts(
+        document.path,
+        fingerprint: document.fingerprint,
+      );
       await _searchIndex.remove(document.path);
     }
     if (!mounted) return;
@@ -2675,6 +2976,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
           : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
+          : _loadError != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 48),
+                    const SizedBox(height: 16),
+                    Text(_loadError!, textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _loading = true;
+                          _loadError = null;
+                        });
+                        unawaited(_load());
+                      },
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : _documents.isEmpty
           ? Center(
               child: Padding(
@@ -3051,7 +3378,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Set<int> _bookmarks = {};
   ReaderColorMode _colorMode = ReaderColorMode.normal;
   double _pageSpacing = 12;
-  double _brightness = 1;
+  double _brightness = .8;
+  bool _brightnessOverride = false;
   bool _keepAwake = false;
   bool _rightToLeft = false;
   bool _showBottomPageControls = false;
@@ -3087,7 +3415,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _controller.removeListener(_schedulePositionSave);
     _positionTimer?.cancel();
     WakelockPlus.disable();
-    ScreenBrightness().resetApplicationScreenBrightness();
+    unawaited(_resetBrightness());
     _searcher.dispose();
     _searchController.dispose();
     _searchFocus.dispose();
@@ -3102,7 +3430,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     _pageSpacing = prefs.getDouble('spacing_$key') ?? 12;
     _rightToLeft = prefs.getBool('rtl_$key') ?? false;
     _keepAwake = prefs.getBool('awake_reader') ?? false;
-    _brightness = prefs.getDouble('brightness_reader') ?? 1;
+    final savedBrightness = prefs.getDouble('brightness_reader');
+    if (savedBrightness != null) {
+      _brightness = savedBrightness;
+      _brightnessOverride = true;
+    }
     _colorMode =
         ReaderColorMode.values[(prefs.getInt('color_reader') ?? 0).clamp(
           0,
@@ -3127,8 +3459,26 @@ class _ReaderScreenState extends State<ReaderScreen> {
               .whereType<ReaderTool>()
               .toSet();
     await WakelockPlus.toggle(enable: _keepAwake);
-    await ScreenBrightness().setApplicationScreenBrightness(_brightness);
+    if (_brightnessOverride) {
+      await _applyBrightness(_brightness);
+    }
     if (mounted) setState(() {});
+  }
+
+  Future<void> _applyBrightness(double value) async {
+    try {
+      await ScreenBrightness().setApplicationScreenBrightness(value);
+    } catch (_) {
+      // Brightness control is optional and unsupported on some devices.
+    }
+  }
+
+  Future<void> _resetBrightness() async {
+    try {
+      await ScreenBrightness().resetApplicationScreenBrightness();
+    } catch (_) {
+      // Restoring system brightness must not interrupt reading.
+    }
   }
 
   void _schedulePositionSave() {
@@ -3303,11 +3653,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
         name: _document.name,
         onLayout: (_) async => bytes,
       );
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         PapertrailNotice.show(
           context,
-          'This PDF could not be printed.',
+          error is AnnotationExportTooLarge
+              ? error.message
+              : error is FormatException
+              ? 'Saved annotations are damaged and could not be printed.'
+              : 'This PDF could not be printed.',
           isError: true,
         );
       }
@@ -3324,11 +3678,15 @@ class _ReaderScreenState extends State<ReaderScreen> {
       await SharePlus.instance.share(
         ShareParams(files: [XFile(exported.path)], text: _document.name),
       );
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         PapertrailNotice.show(
           context,
-          'This PDF could not be shared.',
+          error is AnnotationExportTooLarge
+              ? error.message
+              : error is FormatException
+              ? 'Saved annotations are damaged and could not be shared.'
+              : 'This PDF could not be shared.',
           icon: Icons.share_outlined,
           isError: true,
         );
@@ -3337,6 +3695,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<void> _renameOpenDocument() async {
+    try {
+      await _annotationKey.currentState?.waitForPendingSave();
+    } catch (_) {
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'Wait for the current annotation save before renaming this PDF.',
+          isError: true,
+        );
+      }
+      return;
+    }
     if (_annotationsDirty) {
       try {
         await _annotationKey.currentState?.save();
@@ -3425,15 +3795,34 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     updateSheet(() {});
                   },
                 ),
-                Text('Brightness ${(_brightness * 100).round()}%'),
+                SwitchListTile(
+                  title: const Text('Override system brightness'),
+                  value: _brightnessOverride,
+                  onChanged: (value) {
+                    setState(() => _brightnessOverride = value);
+                    updateSheet(() {});
+                    if (value) {
+                      unawaited(_applyBrightness(_brightness));
+                    } else {
+                      unawaited(_resetBrightness());
+                    }
+                  },
+                ),
+                Text(
+                  _brightnessOverride
+                      ? 'Brightness ${(_brightness * 100).round()}%'
+                      : 'Using system brightness',
+                ),
                 Slider(
                   value: _brightness,
                   min: .1,
-                  onChanged: (value) {
-                    setState(() => _brightness = value);
-                    updateSheet(() {});
-                    ScreenBrightness().setApplicationScreenBrightness(value);
-                  },
+                  onChanged: _brightnessOverride
+                      ? (value) {
+                          setState(() => _brightness = value);
+                          updateSheet(() {});
+                          unawaited(_applyBrightness(value));
+                        }
+                      : null,
                 ),
                 Text('Page spacing ${_pageSpacing.round()}'),
                 Slider(
@@ -3473,7 +3862,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
     await prefs.setDouble('spacing_$key', _pageSpacing);
     await prefs.setBool('rtl_$key', _rightToLeft);
     await prefs.setBool('awake_reader', _keepAwake);
-    await prefs.setDouble('brightness_reader', _brightness);
+    if (_brightnessOverride) {
+      await prefs.setDouble('brightness_reader', _brightness);
+    } else {
+      await prefs.remove('brightness_reader');
+    }
     await prefs.setInt('color_reader', _colorMode.index);
     if (_controller.isReady) _selectViewMode(_viewMode);
   }

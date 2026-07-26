@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -12,10 +13,15 @@ import 'annotations.dart';
 import 'signatures.dart';
 
 class AnnotationExporter {
-  const AnnotationExporter({Directory? temporaryDirectory})
-    : _temporaryDirectory = temporaryDirectory;
+  const AnnotationExporter({
+    Directory? temporaryDirectory,
+    this.maximumPages = 200,
+    this.maximumTotalPixels = 180000000,
+  }) : _temporaryDirectory = temporaryDirectory;
 
   final Directory? _temporaryDirectory;
+  final int maximumPages;
+  final int maximumTotalPixels;
 
   Future<File> export(String pdfPath, {String? password}) async {
     final marks = await _loadMarks(pdfPath);
@@ -26,32 +32,61 @@ class AnnotationExporter {
         pdfPath,
         passwordProvider: password == null ? null : () => password,
       );
+      validatePageCount(source.pages.length);
       final output = pw.Document();
+      var totalPixels = 0;
       for (final page in source.pages) {
         final pageMarks = marks
             .where((mark) => mark.page == page.pageNumber)
             .toList();
-        final scale = (1600 / page.width).clamp(1.0, 2.0);
-        final rendered = await page.render(
-          fullWidth: page.width * scale,
-          fullHeight: page.height * scale,
+        final scale = (1440 / page.width).clamp(.5, 2.0);
+        final renderedPixels =
+            (page.width * scale).round() * (page.height * scale).round();
+        totalPixels += renderedPixels;
+        if (totalPixels > maximumTotalPixels) {
+          throw const AnnotationExportTooLarge(
+            'This annotated PDF is too large to export safely on this device.',
+          );
+        }
+        final rendered = requireRenderedAnnotationPage(
+          await page.render(
+            fullWidth: page.width * scale,
+            fullHeight: page.height * scale,
+          ),
+          page.pageNumber,
         );
-        if (rendered == null) continue;
         ui.Image? base;
         ui.Image? flattened;
         try {
           base = await rendered.createImage();
           flattened = await _flattenPage(base, pageMarks);
-          final data = await flattened.toByteData(
-            format: ui.ImageByteFormat.png,
+          final data = requireEncodedAnnotationPage(
+            await flattened.toByteData(format: ui.ImageByteFormat.png),
+            page.pageNumber,
           );
-          if (data == null) continue;
           final image = pw.MemoryImage(data.buffer.asUint8List());
+          final pageText = (await page.loadText()).trim();
           output.addPage(
             pw.Page(
               pageFormat: pdf.PdfPageFormat(page.width, page.height),
               margin: pw.EdgeInsets.zero,
-              build: (_) => pw.Image(image, fit: pw.BoxFit.fill),
+              build: (_) => pw.Stack(
+                children: [
+                  pw.Positioned.fill(
+                    child: pw.Image(image, fit: pw.BoxFit.fill),
+                  ),
+                  if (pageText.isNotEmpty)
+                    pw.Positioned.fill(
+                      child: pw.Opacity(
+                        opacity: .01,
+                        child: pw.Text(
+                          pageText,
+                          style: const pw.TextStyle(fontSize: 1),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           );
         } finally {
@@ -73,6 +108,14 @@ class AnnotationExporter {
     }
   }
 
+  void validatePageCount(int pageCount) {
+    if (pageCount > maximumPages) {
+      throw AnnotationExportTooLarge(
+        'Annotated export supports at most $maximumPages pages at once.',
+      );
+    }
+  }
+
   Future<List<AnnotationMark>> _loadMarks(String pdfPath) async {
     try {
       final sidecar = File('$pdfPath.papertrail-annotations.json');
@@ -81,8 +124,12 @@ class AnnotationExporter {
       return decoded
           .map((item) => AnnotationMark.fromJson(item as Map<String, dynamic>))
           .toList();
-    } catch (_) {
-      return const [];
+    } on FileSystemException {
+      rethrow;
+    } on FormatException {
+      rethrow;
+    } catch (error) {
+      throw FormatException('Annotations could not be read: $error');
     }
   }
 
@@ -128,7 +175,9 @@ class AnnotationExporter {
       if (path == null) return;
       final file = File(path);
       if (!await file.exists()) return;
-      final codec = await ui.instantiateImageCodec(await file.readAsBytes());
+      final codec = await ui.instantiateImageCodec(
+        await SignatureStore.readImageBytes(path),
+      );
       try {
         final frame = await codec.getNextFrame();
         try {
@@ -173,4 +222,27 @@ class AnnotationExporter {
       canvas.drawPath(path, paint);
     }
   }
+}
+
+PdfImage requireRenderedAnnotationPage(PdfImage? rendered, int pageNumber) {
+  if (rendered == null) {
+    throw StateError('Page $pageNumber could not be rendered for export.');
+  }
+  return rendered;
+}
+
+ByteData requireEncodedAnnotationPage(ByteData? data, int pageNumber) {
+  if (data == null) {
+    throw StateError('Page $pageNumber could not be encoded for export.');
+  }
+  return data;
+}
+
+class AnnotationExportTooLarge implements Exception {
+  const AnnotationExportTooLarge(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }

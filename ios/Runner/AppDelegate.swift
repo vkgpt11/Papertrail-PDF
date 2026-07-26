@@ -39,7 +39,11 @@ import UIKit
       return super.application(app, open: url, options: options)
     }
     pendingPdf = pdf
-    channel?.invokeMethod("openPdf", arguments: pdf)
+    channel?.invokeMethod("openPdf", arguments: pdf) { [weak self] result in
+      if !(result is FlutterError), self?.pendingPdf == pdf {
+        self?.pendingPdf = nil
+      }
+    }
     return true
   }
 

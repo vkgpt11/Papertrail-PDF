@@ -174,6 +174,12 @@ class AnnotationLayerState extends State<AnnotationLayer> {
 
   Future<void> save() => _save();
 
+  Future<void> waitForPendingSave() async {
+    while (_saveInProgress != null) {
+      await _saveInProgress;
+    }
+  }
+
   Future<void> _writeAtomically(String contents) async {
     final target = File(_sidecarPath);
     final temporary = File(
