@@ -138,25 +138,69 @@ class _OpeningPdfOverlay extends StatelessWidget {
 }
 
 class _PdfLoadingView extends StatelessWidget {
-  const _PdfLoadingView();
+  const _PdfLoadingView({required this.fileName});
+
+  final String fileName;
 
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Theme.of(context).colorScheme.surface,
     child: Center(
-      child: Column(
+      child: Semantics(
+        liveRegion: true,
+        label: 'Preparing $fileName',
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const PapertrailLogo(size: 48),
+            const SizedBox(height: 18),
+            const SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Preparing your document…',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: Text(
+                fileName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _LibraryLoadingView extends StatelessWidget {
+  const _LibraryLoadingView();
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: Semantics(
+      liveRegion: true,
+      label: 'Loading the Papertrail PDF library',
+      child: const Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const PapertrailLogo(size: 48),
-          const SizedBox(height: 18),
-          const SizedBox(
-            width: 34,
-            height: 34,
+          PapertrailLogo(size: 48),
+          SizedBox(height: 18),
+          SizedBox.square(
+            dimension: 34,
             child: CircularProgressIndicator(strokeWidth: 3),
           ),
-          const SizedBox(height: 14),
-          const Text(
-            'Preparing your document…',
+          SizedBox(height: 14),
+          Text(
+            'Loading your PDF library…',
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ],
@@ -406,13 +450,31 @@ class _PapertrailAppState extends State<PapertrailApp> {
   ThemeData _theme(Brightness brightness) {
     const seed = Color(0xFF5B5BD6);
     final dark = brightness == Brightness.dark;
+    final colors = ColorScheme.fromSeed(
+      seedColor: seed,
+      brightness: brightness,
+    );
     final base = ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: seed,
-        brightness: brightness,
-      ),
+      colorScheme: colors,
       useMaterial3: true,
       fontFamily: _fontFamily,
+      iconButtonTheme: IconButtonThemeData(
+        style: ButtonStyle(
+          minimumSize: const WidgetStatePropertyAll(Size.square(48)),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? colors.secondaryContainer
+                : null,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? colors.onSecondaryContainer
+                : states.contains(WidgetState.disabled)
+                ? colors.onSurface.withValues(alpha: .38)
+                : null,
+          ),
+        ),
+      ),
       textSelectionTheme: TextSelectionThemeData(
         selectionColor: seed.withValues(alpha: dark ? .42 : .32),
         selectionHandleColor: seed,
@@ -2331,6 +2393,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
             _documents.removeWhere((item) => item.path == currentDocument.path),
       );
       await _store.save(_documents);
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          '${currentDocument.name} was removed from Papertrail.',
+          icon: Icons.remove_circle_outline,
+        );
+      }
       return;
     }
     setState(() {
@@ -2350,7 +2419,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete PDF from Papertrail?'),
+        title: const Text('Remove PDF from Papertrail?'),
         content: Text(
           '"${document.name}" will be deleted from this app and its '
           'Papertrail library copy will be removed from the device. '
@@ -2368,7 +2437,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               foregroundColor: Theme.of(context).colorScheme.onError,
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
@@ -2384,6 +2453,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       () => _documents.removeWhere((item) => item.path == document.path),
     );
     await _store.save(_documents);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        '${document.name} was removed from Papertrail.',
+        icon: Icons.remove_circle_outline,
+      );
+    }
   }
 
   Future<RecentDocument?> _rename(RecentDocument document) async {
@@ -2431,6 +2507,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       });
       await _store.save(_documents);
       await _searchIndex.rename(document.path, renamed.path);
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'Renamed to ${renamed.name}.',
+          icon: Icons.drive_file_rename_outline,
+        );
+      }
       return renamed;
     } on DocumentRenameException catch (error) {
       final recovered = error.actualDocument;
@@ -2511,6 +2594,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _uncategorizedOnly = false;
     });
     await _store.saveFolders(_folders);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        'Folder “$trimmed” created.',
+        icon: Icons.create_new_folder_outlined,
+      );
+    }
   }
 
   Future<void> _moveToFolder(RecentDocument document) async {
@@ -2550,6 +2640,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
           .toList();
     });
     await _store.save(_documents);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        folder.isEmpty
+            ? '${document.name} moved to Uncategorized.'
+            : '${document.name} moved to $folder.',
+        icon: Icons.drive_file_move_outline,
+      );
+    }
   }
 
   List<RecentDocument> get _selectedDocuments => _documents
@@ -2590,6 +2689,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
     );
     if (folder == null || !mounted) return;
+    final movedCount = _selectedDocumentPaths.length;
     setState(() {
       _documents = _documents
           .map(
@@ -2601,6 +2701,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _selectedDocumentPaths.clear();
     });
     await _store.save(_documents);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        '$movedCount PDFs moved to $folder.',
+        icon: Icons.drive_file_move_outline,
+      );
+    }
   }
 
   Future<void> _removeSelectedFromLibrary() async {
@@ -2621,6 +2728,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Remove'),
           ),
@@ -2647,6 +2758,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _selectedDocumentPaths.clear();
     });
     await _store.save(_documents);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        '$count PDFs removed from Papertrail.',
+        icon: Icons.remove_circle_outline,
+      );
+    }
   }
 
   Future<void> _deleteSelectedFromDevice() async {
@@ -2666,6 +2784,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -2688,26 +2810,57 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _selectedDocumentPaths.clear();
     });
     await _store.save(_documents);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        '${selected.length} PDFs permanently deleted from this device.',
+        icon: Icons.delete_outline,
+      );
+    }
   }
 
   Future<void> _toggleFavorite(RecentDocument document) async {
+    final favorite = !document.isFavorite;
     setState(() {
       _documents = _documents
           .map(
             (item) => item.path == document.path
-                ? item.copyWith(isFavorite: !item.isFavorite)
+                ? item.copyWith(isFavorite: favorite)
                 : item,
           )
           .toList();
     });
     await _store.save(_documents);
+    if (mounted) {
+      PapertrailNotice.show(
+        context,
+        favorite ? 'Added to Favorites.' : 'Removed from Favorites.',
+        icon: favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+      );
+    }
   }
 
   Future<void> _sharePdf(RecentDocument document) async {
-    final exported = await const AnnotationExporter().export(document.path);
-    await SharePlus.instance.share(
-      ShareParams(files: [XFile(exported.path)], text: document.name),
-    );
+    try {
+      PapertrailNotice.show(
+        context,
+        'Preparing ${document.name} for sharing…',
+        icon: Icons.share_outlined,
+      );
+      final exported = await const AnnotationExporter().export(document.path);
+      await SharePlus.instance.share(
+        ShareParams(files: [XFile(exported.path)], text: document.name),
+      );
+    } catch (_) {
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'This PDF could not be shared.',
+          icon: Icons.share_outlined,
+          isError: true,
+        );
+      }
+    }
   }
 
   String _formatLastOpened(RecentDocument document) {
@@ -2907,7 +3060,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   HeaderAction.documentScanner,
                 ))
                   IconButton(
-                    tooltip: 'Scan paper document',
+                    tooltip: _scanningDocument
+                        ? 'Document scan in progress'
+                        : 'Scan paper document',
                     onPressed: _scanningDocument ? null : _showScannerOptions,
                     icon: _scanningDocument
                         ? const SizedBox.square(
@@ -2930,7 +3085,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                 if (_enabledHeaderActions.contains(HeaderAction.scanFolder))
                   IconButton(
-                    tooltip: 'Scan a folder for PDFs',
+                    tooltip: _scanning
+                        ? 'Folder scan in progress'
+                        : 'Scan a folder for PDFs',
                     onPressed: _scanning ? null : _scanFolder,
                     icon: _scanning
                         ? const SizedBox.square(
@@ -2975,7 +3132,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             )
           : null,
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const _LibraryLoadingView()
           : _loadError != null
           ? Center(
               child: Padding(
@@ -3302,6 +3459,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               onChanged: (_) => _toggleDocumentSelection(document),
             )
           : PopupMenuButton<String>(
+              tooltip: 'Document actions',
               onSelected: (value) {
                 if (value == 'favorite') _toggleFavorite(document);
                 if (value == 'rename') _rename(document);
@@ -3312,25 +3470,69 @@ class _LibraryScreenState extends State<LibraryScreen> {
               itemBuilder: (_) => [
                 PopupMenuItem(
                   value: 'favorite',
-                  child: Text(
-                    document.isFavorite
-                        ? 'Remove from favorites'
-                        : 'Add to favorites',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      document.isFavorite
+                          ? Icons.star_rounded
+                          : Icons.star_outline_rounded,
+                    ),
+                    title: Text(
+                      document.isFavorite
+                          ? 'Remove from favorites'
+                          : 'Add to favorites',
+                    ),
+                    trailing: document.isFavorite
+                        ? const Icon(Icons.check_circle_rounded)
+                        : null,
+                    selected: document.isFavorite,
                   ),
                 ),
-                const PopupMenuItem(value: 'rename', child: Text('Rename')),
+                const PopupMenuItem(
+                  value: 'rename',
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.drive_file_rename_outline),
+                    title: Text('Rename'),
+                  ),
+                ),
                 if (_folders.isNotEmpty)
                   const PopupMenuItem(
                     value: 'move',
-                    child: Text('Move to folder'),
+                    child: ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.drive_file_move_outline),
+                      title: Text('Move to folder'),
+                    ),
                   ),
                 const PopupMenuItem(
                   value: 'share',
-                  child: Text('Share or export'),
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.share_outlined),
+                    title: Text('Share or export'),
+                  ),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'remove',
-                  child: Text('Delete from device'),
+                  child: ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      Icons.remove_circle_outline,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    title: Text(
+                      'Remove from Papertrail',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -3643,6 +3845,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Future<void> _printDocument() async {
     try {
+      PapertrailNotice.show(
+        context,
+        'Preparing ${_document.name} for printing…',
+        icon: Icons.print_outlined,
+      );
       if (_annotationsDirty) await _annotationKey.currentState?.save();
       final exported = await const AnnotationExporter().export(
         _document.path,
@@ -3653,6 +3860,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
         name: _document.name,
         onLayout: (_) async => bytes,
       );
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'Print dialog opened.',
+          icon: Icons.print_outlined,
+        );
+      }
     } catch (error) {
       if (mounted) {
         PapertrailNotice.show(
@@ -3670,6 +3884,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Future<void> _shareOpenDocument() async {
     try {
+      PapertrailNotice.show(
+        context,
+        'Preparing ${_document.name} for sharing…',
+        icon: Icons.share_outlined,
+      );
       if (_annotationsDirty) await _annotationKey.currentState?.save();
       final exported = await const AnnotationExporter().export(
         _document.path,
@@ -3678,6 +3897,13 @@ class _ReaderScreenState extends State<ReaderScreen> {
       await SharePlus.instance.share(
         ShareParams(files: [XFile(exported.path)], text: _document.name),
       );
+      if (mounted) {
+        PapertrailNotice.show(
+          context,
+          'Share sheet opened.',
+          icon: Icons.share_outlined,
+        );
+      }
     } catch (error) {
       if (mounted) {
         PapertrailNotice.show(
@@ -4326,8 +4552,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
             child: ListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              leading: Icon(readerToolIcon(entry.key)),
-              title: Text(readerToolLabel(entry.key)),
+              leading: Icon(
+                readerToolIcon(entry.key),
+                color: entry.key == ReaderTool.delete
+                    ? Theme.of(context).colorScheme.error
+                    : null,
+              ),
+              title: Text(
+                readerToolLabel(entry.key),
+                style: entry.key == ReaderTool.delete
+                    ? TextStyle(color: Theme.of(context).colorScheme.error)
+                    : null,
+              ),
               trailing: _isReaderToolSelected(entry.key)
                   ? const Icon(Icons.check_circle_rounded)
                   : null,
@@ -4465,14 +4701,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Previous match',
+                          tooltip: _searcher.hasMatches
+                              ? 'Previous match'
+                              : 'No previous search match',
                           onPressed: _searcher.hasMatches
                               ? _previousMatch
                               : null,
                           icon: const Icon(Icons.keyboard_arrow_up),
                         ),
                         IconButton(
-                          tooltip: 'Next match',
+                          tooltip: _searcher.hasMatches
+                              ? 'Next match'
+                              : 'No next search match',
                           onPressed: _searcher.hasMatches ? _nextMatch : null,
                           icon: const Icon(Icons.keyboard_arrow_down),
                         ),
@@ -4483,6 +4723,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                             tooltip: 'Save annotation changes',
                             onPressed: () =>
                                 _annotationKey.currentState?.save(),
+                            isSelected: true,
+                            selectedIcon: const Icon(Icons.save_rounded),
                             icon: const Icon(Icons.save_outlined),
                           ),
                         if (_enabledReaderTools.contains(ReaderTool.search))
@@ -4499,6 +4741,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                                 ? 'Remove bookmark'
                                 : 'Bookmark page',
                             onPressed: _toggleBookmark,
+                            isSelected: _bookmarks.contains(_page),
+                            selectedIcon: const Icon(Icons.bookmark),
                             icon: Icon(
                               _bookmarks.contains(_page)
                                   ? Icons.bookmark
@@ -4515,9 +4759,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
                             onPressed: () => setState(
                               () => _annotationMode = !_annotationMode,
                             ),
-                            icon: Icon(
-                              _annotationMode ? Icons.edit_off : Icons.edit,
-                            ),
+                            isSelected: _annotationMode,
+                            selectedIcon: const Icon(Icons.edit_off),
+                            icon: const Icon(Icons.edit),
                           ),
                         if (_readerToolMenuItems().isNotEmpty)
                           PopupMenuButton<String>(
@@ -4650,7 +4894,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     params: PdfViewerParams(
                       buildContextMenu: _buildSelectionContextMenu,
                       loadingBannerBuilder: (_, __, ___) =>
-                          const _PdfLoadingView(),
+                          _PdfLoadingView(fileName: _document.name),
                       layoutPages: switch (_viewMode) {
                         ReaderViewMode.vertical => null,
                         ReaderViewMode.horizontal => _horizontalLayout,

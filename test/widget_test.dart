@@ -174,7 +174,7 @@ void main() {
     expect(find.text('Page count: most'), findsNothing);
   });
 
-  testWidgets('horizontal cue reveals additional content in both directions', (
+  testWidgets('horizontal cue buttons navigate in both directions', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -200,8 +200,12 @@ void main() {
     await tester.pump();
     expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
     expect(find.byIcon(Icons.chevron_left_rounded), findsNothing);
-    await tester.drag(find.byType(ListView), const Offset(-180, 0));
-    await tester.pump();
+    await tester.tap(find.byTooltip('Show more items'));
+    await tester.pumpAndSettle();
     expect(find.byIcon(Icons.chevron_left_rounded), findsOneWidget);
+    await tester.tap(find.byTooltip('Show previous items'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.chevron_left_rounded), findsNothing);
+    expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
   });
 }
