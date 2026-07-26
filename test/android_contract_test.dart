@@ -100,7 +100,9 @@ void main() {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     expect(pubspec, contains('family: Inter'));
     expect(pubspec, contains('family: Poppins'));
-    expect(pubspec, contains('assets/fonts/licenses/'));
+    expect(pubspec, isNot(contains('assets/fonts/licenses/')));
+    expect(File('assets/fonts/licenses/inter-OFL.txt').existsSync(), isTrue);
+    expect(File('assets/fonts/licenses/poppins-OFL.txt').existsSync(), isTrue);
     expect(source, isNot(contains('HeaderAction.theme')));
   });
 
