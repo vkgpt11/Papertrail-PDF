@@ -25,6 +25,7 @@ import 'library_logic.dart';
 import 'notifications.dart';
 import 'pdf_summary.dart';
 import 'horizontal_scroll_cue.dart';
+import 'pdf_password_prompt.dart';
 
 const _readerDeletedResult = -1;
 
@@ -3557,6 +3558,37 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
+class _ReaderPdfDocumentRef extends PdfDocumentRef {
+  _ReaderPdfDocumentRef(this.path, {required this.passwordProvider});
+
+  final String path;
+
+  @override
+  final PdfPasswordProvider passwordProvider;
+
+  @override
+  bool get firstAttemptByEmptyPassword => true;
+
+  @override
+  String get sourceName => path;
+
+  @override
+  Future<PdfDocument> loadDocument(
+    PdfDocumentLoaderProgressCallback progressCallback,
+  ) => PdfDocument.openFile(
+    path,
+    passwordProvider: passwordProvider,
+    firstAttemptByEmptyPassword: firstAttemptByEmptyPassword,
+  );
+
+  // A reader session must never inherit a failed load cached for the same path.
+  @override
+  bool operator ==(Object other) => identical(this, other);
+
+  @override
+  int get hashCode => identityHashCode(this);
+}
+
 enum ReaderViewMode { vertical, horizontal, twoPage }
 
 enum ReaderColorMode { normal, night, sepia }
@@ -3591,6 +3623,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _doubleTapZoomedIn = false;
   bool _summaryLoading = false;
   String? _documentPassword;
+  late final PdfDocumentRef _pdfDocumentRef;
+  int _passwordAttempts = 0;
+  bool _passwordCancelled = false;
   Set<ReaderTool> _enabledReaderTools = {...essentialReaderTools};
   Timer? _positionTimer;
 
@@ -3598,6 +3633,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void initState() {
     super.initState();
     _document = widget.document;
+    _pdfDocumentRef = _ReaderPdfDocumentRef(
+      _document.path,
+      passwordProvider: _passwordProvider,
+    );
     _page = _document.page;
     _searcher = PdfTextSearcher(_controller);
     _searcher.addListener(_onSearchChanged);
@@ -3733,34 +3772,95 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Future<String?> _passwordProvider() async {
-    final controller = TextEditingController();
-    final password = await showDialog<String>(
+    if (!mounted || _passwordCancelled) return null;
+    if (_passwordAttempts > 0) {
+      // Let the previous dialog route finish closing before showing the retry.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      if (!mounted || _passwordCancelled) return null;
+    }
+    final result = await showDialog<PdfPasswordPromptResult>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Password required'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: true,
-          decoration: const InputDecoration(labelText: 'PDF password'),
-          onSubmitted: (value) => Navigator.pop(context, value),
+      builder: (_) =>
+          PdfPasswordPromptDialog(incorrectPassword: _passwordAttempts > 0),
+    );
+    if (!mounted) return null;
+    if (result == null || result.cancelled) {
+      _passwordCancelled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+      });
+      return null;
+    }
+    _passwordAttempts++;
+    _documentPassword = result.password;
+    return result.password;
+  }
+
+  Future<void> _retryPdfLoad() async {
+    _passwordCancelled = false;
+    _passwordAttempts = 0;
+    _documentPassword = null;
+    await _pdfDocumentRef.resolveListenable().load(forceReload: true);
+  }
+
+  Widget _buildPdfErrorBanner(
+    BuildContext context,
+    Object error,
+    StackTrace? stackTrace,
+    PdfDocumentRef documentRef,
+  ) {
+    if (_passwordCancelled) return const SizedBox.shrink();
+    final passwordError = error is PdfPasswordException;
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                passwordError
+                    ? Icons.lock_outline_rounded
+                    : Icons.error_outline,
+                size: 48,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                passwordError
+                    ? 'This PDF could not be unlocked'
+                    : 'This PDF could not be opened',
+                style: Theme.of(context).textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                passwordError
+                    ? 'Check the password and try again.'
+                    : 'The file may be damaged or use an unsupported format.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                spacing: 12,
+                children: [
+                  OutlinedButton(
+                    onPressed: () => Navigator.maybePop(context),
+                    child: const Text('Back to library'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: _retryPdfLoad,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: Text(passwordError ? 'Try password again' : 'Retry'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Open'),
-          ),
-        ],
       ),
     );
-    controller.dispose();
-    if (password != null) _documentPassword = password;
-    return password;
   }
 
   Future<void> _jumpToPage() async {
@@ -4885,16 +4985,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
                       0,
                     ],
                   }),
-                  child: PdfViewer.file(
-                    _document.path,
+                  child: PdfViewer(
+                    _pdfDocumentRef,
                     key: ValueKey(_viewMode),
-                    passwordProvider: _passwordProvider,
                     controller: _controller,
                     initialPageNumber: _page,
                     params: PdfViewerParams(
                       buildContextMenu: _buildSelectionContextMenu,
                       loadingBannerBuilder: (_, __, ___) =>
                           _PdfLoadingView(fileName: _document.name),
+                      errorBannerBuilder: _buildPdfErrorBanner,
                       layoutPages: switch (_viewMode) {
                         ReaderViewMode.vertical => null,
                         ReaderViewMode.horizontal => _horizontalLayout,
