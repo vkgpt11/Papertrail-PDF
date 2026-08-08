@@ -181,23 +181,18 @@ Key capabilities include:
 Scanning should provide clear capture guidance, stable edge detection, readable
 output, and a review step before the PDF is saved.
 
-## 9. Smart Reading
+## 9. OCR-Assisted Search
 
-Smart-reading tools help users understand lengthy documents more quickly.
+OCR-assisted search keeps scanned and image-only PDFs discoverable without
+introducing document summarization. Smart Reading, PDF summaries, and automatic
+important-information extraction are intentionally unavailable.
 
 Key capabilities include:
 
-- Producing a summary from extractable PDF text
-- Identifying important sentences or information
-- Retaining page references for summarized content
-- Allowing summarization to be enabled or disabled in settings
-- Supporting cancellation and incremental progress
-- Caching completed summaries when appropriate
-- Handling large, password-protected, damaged, and image-only PDFs safely
-
-Summaries are generated aids and should not be treated as guaranteed complete or
-authoritative representations of a document.
-
+- On-device OCR indexing for scanned documents
+- Content-search matches linked to source pages
+- No summary generation or summary cache
+- No PDF content sent to a summarization service
 ## 10. Personalization and Accessibility
 
 Personalization lets users adjust the application to their reading needs while

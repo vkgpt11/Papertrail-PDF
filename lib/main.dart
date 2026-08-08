@@ -23,7 +23,6 @@ import 'annotation_export.dart';
 import 'library_search.dart';
 import 'library_logic.dart';
 import 'notifications.dart';
-import 'pdf_summary.dart';
 import 'horizontal_scroll_cue.dart';
 import 'pdf_password_prompt.dart';
 
@@ -232,7 +231,6 @@ Future<void> deleteDocumentArtifacts(
     final file = File(path);
     if (await file.exists()) await file.delete();
   }
-  await PdfSummaryService.clearCache();
   if (fingerprint != null) {
     final prefs = await SharedPreferences.getInstance();
     for (final key in [
@@ -253,6 +251,7 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   pdfrxFlutterInitialize();
   unawaited(_cleanupTemporaryFiles());
+  unawaited(_removeRetiredSmartReadingData());
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
     unawaited(_writePrivateCrashLog(details.exceptionAsString()));
@@ -310,20 +309,30 @@ Future<void> _cleanupTemporaryFiles() async {
         // Some platforms do not allow enumerating the system temp directory.
       }
     }
+  } catch (_) {
+    // Cleanup must never create an unhandled startup error.
+  }
+}
+
+Future<void> _removeRetiredSmartReadingData() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('pdf_summaries_enabled');
+    await prefs.remove('important_highlights_enabled');
+  } catch (_) {
+    // Retired preferences must not interrupt application startup.
+  }
+  try {
+    final temporaryDirectory = await getTemporaryDirectory();
     final summaryDirectory = Directory(
-      '${(await getTemporaryDirectory()).path}${Platform.pathSeparator}'
+      '${temporaryDirectory.path}${Platform.pathSeparator}'
       'papertrail-summaries',
     );
     if (await summaryDirectory.exists()) {
-      await cleanupTemporaryDirectory(
-        summaryDirectory,
-        shouldDelete: (file) =>
-            now.difference(file.statSync().modified) >
-            const Duration(hours: 24),
-      );
+      await summaryDirectory.delete(recursive: true);
     }
   } catch (_) {
-    // Cleanup must never create an unhandled startup error.
+    // A locked legacy cache must not interrupt application startup.
   }
 }
 
@@ -1252,8 +1261,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   bool _showTextSelectionMagnifier = false;
   bool _showInAppMessages = true;
   bool _showLibrarySearch = true;
-  bool _pdfSummariesEnabled = false;
-  bool _importantHighlightsEnabled = false;
   String _libraryQuery = '';
   bool _loading = true;
   String? _loadError;
@@ -1379,9 +1386,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _showInAppMessages =
             prefs.getBool(PapertrailNotice.preferenceKey) ?? true;
         _showLibrarySearch = prefs.getBool('show_library_search') ?? true;
-        _pdfSummariesEnabled = prefs.getBool('pdf_summaries_enabled') ?? false;
-        _importantHighlightsEnabled =
-            prefs.getBool('important_highlights_enabled') ?? false;
         final savedScanMode = prefs.getString('scan_capture_mode');
         _scanMode =
             PapertrailScanMode.values
@@ -1714,47 +1718,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool(PapertrailNotice.preferenceKey, value);
             },
-          ),
-        ],
-      ),
-      ExpansionTile(
-        key: const PageStorageKey('smart-reading-settings'),
-        maintainState: true,
-        leading: const Icon(Icons.auto_awesome_outlined),
-        title: const Text(
-          'Smart reading',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
-        children: [
-          _settingsSwitch(
-            title: 'PDF summaries',
-            icon: Icons.summarize_outlined,
-            subtitle: 'Create a private on-device summary when requested',
-            value: _pdfSummariesEnabled,
-            onChanged: (value) async {
-              setState(() {
-                _pdfSummariesEnabled = value;
-                if (!value) _importantHighlightsEnabled = false;
-              });
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.setBool('pdf_summaries_enabled', value);
-              if (!value) {
-                await prefs.setBool('important_highlights_enabled', false);
-              }
-            },
-          ),
-          _settingsSwitch(
-            title: 'Important information highlights',
-            icon: Icons.auto_awesome_rounded,
-            subtitle: 'Show ranked key points with their page numbers',
-            value: _pdfSummariesEnabled && _importantHighlightsEnabled,
-            onChanged: !_pdfSummariesEnabled
-                ? null
-                : (value) async {
-                    setState(() => _importantHighlightsEnabled = value);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('important_highlights_enabled', value);
-                  },
           ),
         ],
       ),
@@ -3618,10 +3581,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   bool _rightToLeft = false;
   bool _showBottomPageControls = false;
   bool _showTextSelectionMagnifier = false;
-  bool _pdfSummariesEnabled = false;
-  bool _importantHighlightsEnabled = false;
   bool _doubleTapZoomedIn = false;
-  bool _summaryLoading = false;
   String? _documentPassword;
   late final PdfDocumentRef _pdfDocumentRef;
   int _passwordAttempts = 0;
@@ -3685,9 +3645,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
         prefs.getBool('show_bottom_page_controls') ?? false;
     _showTextSelectionMagnifier =
         prefs.getBool('text_selection_magnifier') ?? false;
-    _pdfSummariesEnabled = prefs.getBool('pdf_summaries_enabled') ?? false;
-    _importantHighlightsEnabled =
-        prefs.getBool('important_highlights_enabled') ?? false;
     final savedReaderTools = prefs.getStringList('enabled_reader_tools');
     _enabledReaderTools = savedReaderTools == null
         ? {...essentialReaderTools}
@@ -4479,152 +4436,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     setState(() => _viewMode = mode);
   }
 
-  Future<void> _summarizePdf() async {
-    if (_summaryLoading) return;
-    setState(() => _summaryLoading = true);
-    var cancelled = false;
-    var dialogVisible = true;
-    final progress = ValueNotifier<(int, int)>((0, 0));
-    unawaited(
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Summarizing PDF'),
-          content: ValueListenableBuilder<(int, int)>(
-            valueListenable: progress,
-            builder: (_, value, __) {
-              final (completed, total) = value;
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  LinearProgressIndicator(
-                    value: total > 0 ? completed / total : null,
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    total > 0
-                        ? 'Processing page $completed of $total'
-                        : 'Preparing document…',
-                  ),
-                ],
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                cancelled = true;
-                dialogVisible = false;
-                Navigator.pop(dialogContext);
-              },
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      ).then((_) => dialogVisible = false),
-    );
-    await Future<void>.delayed(Duration.zero);
-    try {
-      final result = await PdfSummaryService().summarize(
-        _document.path,
-        password: _documentPassword,
-        onProgress: (completed, total) {
-          progress.value = (completed, total);
-        },
-        isCancelled: () => cancelled,
-      );
-      if (dialogVisible && mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        dialogVisible = false;
-      }
-      if (!mounted) return;
-      if (result.summary.isEmpty) {
-        PapertrailNotice.show(
-          context,
-          'No readable text was found in this PDF.',
-          icon: Icons.info_outline,
-        );
-        return;
-      }
-      await showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        showDragHandle: true,
-        builder: (context) => DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: .72,
-          maxChildSize: .94,
-          minChildSize: .45,
-          builder: (context, controller) => ListView(
-            controller: controller,
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-            children: [
-              Text(
-                'PDF summary',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Generated privately on this device from ${result.pagesRead} pages.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 16),
-              for (final sentence in result.summary)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Text('• $sentence'),
-                ),
-              if (_importantHighlightsEnabled) ...[
-                const SizedBox(height: 14),
-                Text(
-                  'Important information',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 8),
-                for (final point in result.importantPoints)
-                  Card(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.tertiaryContainer.withValues(alpha: .55),
-                    child: ListTile(
-                      leading: const Icon(Icons.auto_awesome_rounded),
-                      title: Text(point.text),
-                      subtitle: Text('Page ${point.page}'),
-                      onTap: () {
-                        Navigator.pop(context);
-                        _go(point.page);
-                      },
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
-      );
-    } on SummaryCancelled {
-      // Cancellation is an expected user action.
-    } catch (_) {
-      if (mounted) {
-        PapertrailNotice.show(
-          context,
-          'This PDF could not be summarized.',
-          icon: Icons.error_outline,
-        );
-      }
-    } finally {
-      if (dialogVisible && mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      progress.dispose();
-      if (mounted) setState(() => _summaryLoading = false);
-    }
-  }
-
   List<PopupMenuEntry<String>> _readerToolMenuItems() {
     const menuTools = <ReaderTool, String>{
       ReaderTool.thumbnails: 'thumbnails',
@@ -4672,21 +4483,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
           ),
         )
         .toList();
-    if (_pdfSummariesEnabled) {
-      items.insert(
-        0,
-        PopupMenuItem<String>(
-          value: 'summarize',
-          enabled: !_summaryLoading,
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.auto_awesome_rounded),
-            title: Text(_summaryLoading ? 'Summarizing…' : 'Summarize PDF'),
-          ),
-        ),
-      );
-    }
     return items;
   }
 
@@ -4868,8 +4664,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
                             tooltip: 'Reader tools',
                             onSelected: (value) {
                               switch (value) {
-                                case 'summarize':
-                                  _summarizePdf();
                                 case 'thumbnails':
                                   _showThumbnails();
                                 case 'jump':

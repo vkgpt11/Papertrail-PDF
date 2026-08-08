@@ -244,36 +244,33 @@ device testing or representative PDF files to confirm.
 - Test denied and permanently denied camera permissions.
 - Test a 20-page scan on the target Motorola device.
 
-## 9. Smart Reading
+## 9. OCR-Assisted Search
+
+### Current scope
+
+- Smart Reading, PDF summarization, and automatic important-information
+  extraction have been retired and are unavailable throughout the application.
+- Existing Smart Reading preferences and cached summaries are removed safely
+  during startup.
+- OCR-based document indexing and search remain available.
 
 ### Potential defects
 
-- The current summary is extractive and frequency-based rather than an
-  AI-generated semantic summary.
-- Ranking uses English-oriented words, patterns, and stop words.
-- OCR of every scanned page can be slow and battery intensive.
-- Cached summaries do not account for summary-language preferences.
-- Cancellation cannot interrupt a page-render or OCR operation already in
+- OCR of scanned pages can consume significant memory and battery.
+- OCR quality depends on scan resolution, contrast, orientation, and language.
+- Cancellation may not interrupt a page render or OCR operation already in
   progress.
-- Sentences containing numbers or keywords may be marked important even when
-  they are not contextually important.
 
 ### Recommended improvements
 
-- Label results as **Automatic extractive summary**.
-- Display source-page links and limitations.
-- Add language-aware sentence and word processing.
-- Process large PDFs in bounded batches.
-- Allow users to summarize selected pages.
-- Show incremental progress and an active Cancel action.
+- Keep OCR work on demand, cached, bounded, and cancellable between pages.
+- Clearly identify OCR-derived search results.
+- Continue testing OCR independently from the retired summary feature.
 
 ### How the user can help
 
-- Compare summaries with documents whose content is well understood.
-- Identify statements that were incorrectly selected or overlooked.
-- Decide whether future cloud or AI summarization may send document text
-  off-device. This requires an explicit privacy decision.
-
+- Test search using scanned PDFs with different quality and languages.
+- Report false or missing OCR search matches with the source page number.
 ## 10. Personalization and Accessibility
 
 ### Potential defects
