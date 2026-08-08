@@ -44,7 +44,6 @@ void main() {
       'android/app/src/main/kotlin/com/papertrail/pdfreader/MainActivity.kt',
     ).readAsStringSync();
     final exporter = File('lib/annotation_export.dart').readAsStringSync();
-    final summary = File('lib/pdf_summary.dart').readAsStringSync();
     final signatures = File('lib/signatures.dart').readAsStringSync();
     final ios = File('ios/Runner/AppDelegate.swift').readAsStringSync();
     final iosPlist = File('ios/Runner/Info.plist').readAsStringSync();
@@ -62,14 +61,16 @@ void main() {
     expect(source, contains('Override system brightness'));
     expect(source, contains('prefs.remove(\'brightness_reader\')'));
     expect(source, contains('_brightnessOverride = true'));
-    expect(source, contains('PdfSummaryService.clearCache()'));
+    expect(source, contains('_removeRetiredSmartReadingData()'));
+    expect(source, contains("prefs.remove('pdf_summaries_enabled')"));
+    expect(source, contains("prefs.remove('important_highlights_enabled')"));
+    expect(source, contains("'papertrail-summaries'"));
     expect(source, contains('Keep loading valid entries'));
     expect(source, contains('known.remove(fingerprint)'));
     expect(source, contains('Papertrail could not load the library.'));
     expect(source, contains('One locked temporary file'));
     expect(source, contains('512 * 1024'));
     expect(source, contains('sanitizeCrashMessage'));
-    expect(summary, contains('static Future<void> clearCache()'));
 
     expect(android, contains('pendingPdf = pdf'));
     expect(android, contains('object : MethodChannel.Result'));
@@ -357,14 +358,15 @@ void main() {
     expect(source, contains('(!_favoritesOnly || document.isFavorite)'));
   });
 
-  test('smart reading is configurable and available in the reader', () {
+  test('smart reading is unavailable while OCR search remains available', () {
     final source = File('lib/main.dart').readAsStringSync();
-    expect(source, contains("title: 'PDF summaries'"));
-    expect(source, contains("title: 'Important information highlights'"));
-    expect(source, contains("'pdf_summaries_enabled'"));
-    expect(source, contains("'important_highlights_enabled'"));
-    expect(source, contains("value: 'summarize'"));
-    expect(source, contains('PdfSummaryService'));
+    final search = File('lib/library_search.dart').readAsStringSync();
+    expect(source, isNot(contains("title: 'Smart reading'")));
+    expect(source, isNot(contains("value: 'summarize'")));
+    expect(source, isNot(contains('PdfSummaryService')));
+    expect(File('lib/pdf_summary.dart').existsSync(), isFalse);
+    expect(search, contains('TextRecognizer'));
+    expect(search, contains('indexPdf'));
   });
 
   test('an open PDF can be shared from reader tools', () {
@@ -451,18 +453,6 @@ void main() {
     expect(delegate, contains('openPdf'));
     expect(delegate, contains('startAccessingSecurityScopedResource'));
     expect(delegate, contains('cachePdf'));
-  });
-
-  test('summaries expose progress, cancellation, OCR, and caching', () {
-    final source = File('lib/main.dart').readAsStringSync();
-    final summary = File('lib/pdf_summary.dart').readAsStringSync();
-    expect(source, contains("'Summarizing PDF'"));
-    expect(source, contains("child: const Text('Cancel')"));
-    expect(summary, contains('onProgress'));
-    expect(summary, contains('isCancelled'));
-    expect(summary, contains('_searchIndex.indexPdf'));
-    expect(summary, contains('_loadCached'));
-    expect(summary, contains('_saveCached'));
   });
 
   test('horizontal sections provide functional navigation buttons', () {
